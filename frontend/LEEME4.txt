@@ -1,0 +1,66 @@
+LEEME 4 - Actualización a Tailwind v4 (igualar a SFL) + paleta oficial
+===========================================================================
+
+POR QUÉ ESTE CAMBIO
+----------------------
+Al pedirte el tailwind.config.js de SFL, descubrimos que SFL usa Tailwind v4,
+que ya NO usa ese archivo — los colores se definen directo en el CSS con un
+bloque @theme. El scaffold inicial de SAEL se armó con Tailwind v3, así que
+hay que actualizarlo para que ambos sistemas compartan la misma base.
+
+QUÉ CONTIENE ESTA ENTREGA
+--------------------------
+- frontend/src/index.css     → REEMPLAZA: ahora con Tailwind v4 y la paleta
+  oficial de FIHNEC (ember=rojo, gold=dorado antorcha, palm=verde globo,
+  night=fondo oscuro cálido, parchment=crema)
+- frontend/vite.config.js    → REEMPLAZA: usa el plugin de Tailwind v4
+- frontend/package.json      → REEMPLAZA: dependencias actualizadas a
+  Tailwind v4
+- frontend/src/App.jsx       → REEMPLAZA: usa los nuevos tokens de color
+
+ARCHIVOS A ELIMINAR
+----------------------
+Estos ya NO se usan en Tailwind v4, bórralos de tu carpeta frontend/:
+  - tailwind.config.js
+  - postcss.config.js
+
+PASOS
+--------
+1. Borra los 2 archivos mencionados arriba (tailwind.config.js y
+   postcss.config.js) de tu carpeta frontend/
+
+2. Reemplaza estos 4 archivos con los nuevos adjuntos:
+   - frontend/src/index.css
+   - frontend/vite.config.js
+   - frontend/package.json
+   - frontend/src/App.jsx
+
+3. Como cambiaron las dependencias, hay que reinstalar. En cmd, DENTRO de
+   frontend/:
+
+   rmdir /s /q node_modules
+   del package-lock.json
+   npm install
+
+   (El primer comando borra la carpeta node_modules vieja, el segundo borra
+   el lock file viejo — así npm instala limpio con las versiones nuevas.)
+
+4. Prueba que siga funcionando:
+
+   npm run dev
+
+   Abre http://localhost:5173/ — deberías ver "SAEL Honduras" en rojo
+   (color ember) sobre fondo crema (parchment), con la tipografía Fraunces
+   en el título.
+
+5. Sube los cambios:
+
+   git add .
+   git commit -m "chore: migrar frontend a Tailwind v4, paleta oficial FIHNEC"
+   git push
+
+SIGUIENTE PASO
+----------------
+Con esto listo, ya podemos construir la página principal (Home) real,
+adaptada del componente de SFL que compartiste, con el contador regresivo
+al próximo evento SAEL.

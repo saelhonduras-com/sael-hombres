@@ -1,3 +1,39 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+@import "tailwindcss";
+@import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,600;9..144,700;9..144,900&family=Public+Sans:wght@400;500;600;700;800&display=swap');
+
+@theme {
+  --color-ink: #1F1611;
+  --color-night: #241012;
+  --color-night-2: #2E1418;
+  --color-ember: #E31E24;
+  --color-ember-light: #F0453E;
+  --color-gold: #C89B5C;
+  --color-gold-light: #DFC08C;
+  --color-gold-pale: #F3E6CE;
+  --color-flame: #F7941D;
+  --color-palm: #1B7A3D;
+  --color-palm-light: #3F9A5C;
+  --color-parchment: #FBF6EC;
+  --color-parchment-2: #F3EAD3;
+
+  --font-display: 'Fraunces', serif;
+  --font-body: 'Public Sans', sans-serif;
+}
+
+html { scroll-behavior: smooth; }
+
+body {
+  font-family: var(--font-body);
+  background-color: var(--color-parchment);
+  color: var(--color-ink);
+}
+
+h1, h2, h3, .font-display { font-family: var(--font-display); }
+
+@media (prefers-reduced-motion: reduce) {
+  * { animation: none !important; transition: none !important; }
+}
+
+.grain-overlay {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.035'/%3E%3C/svg%3E");
+}
