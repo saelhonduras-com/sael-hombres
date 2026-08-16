@@ -1,0 +1,41 @@
+LEEME - Setup inicial del repositorio SAEL Honduras
+=====================================================
+
+QUÉ CONTIENE ESTA ENTREGA
+--------------------------
+4 archivos que van en la RAÍZ del repositorio (no dentro de backend/ ni frontend/):
+
+- README.md       → descripción general del proyecto
+- CHANGELOG.md     → historial de versiones, arranca en v0.1.0
+- AUTORIA.md       → créditos del proyecto
+- .gitignore       → evita subir node_modules, .env, archivos de build, etc.
+
+PASOS PARA SUBIRLOS A GITHUB
+------------------------------
+
+1. En tu computadora, crea una carpeta para el proyecto, por ejemplo:
+   C:\Users\Los Hermanos\Desktop\CRMS\FIHNEC\SAEL\SAEL-sistema-web
+
+2. Abre esa carpeta y copia ahí los 4 archivos adjuntos (README.md, CHANGELOG.md,
+   AUTORIA.md, .gitignore).
+
+3. Abre una terminal (cmd) dentro de esa carpeta y ejecuta, uno por uno:
+
+   git init
+   git remote add origin https://github.com/saelhonduras-com/registro.git
+   git add .
+   git commit -m "chore: setup inicial del repositorio v0.1.0"
+   git branch -M main
+   git push -u origin main
+
+4. Si te pide iniciar sesión, usa tus credenciales de GitHub (o un Personal
+   Access Token si tienes autenticación de dos factores activada — si te pide
+   eso, avísame y te guío para generarlo).
+
+5. Cuando termine el push, refresca la página de GitHub
+   (github.com/saelhonduras-com/registro) y deberías ver los 4 archivos ahí.
+
+SIGUIENTE PASO
+----------------
+Una vez subido esto, seguimos con la estructura inicial de backend/ y frontend/
+(scaffold de Node/Express y React/Vite/Tailwind).
