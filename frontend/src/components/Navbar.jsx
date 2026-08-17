@@ -9,9 +9,6 @@ export default function Navbar() {
           <img src={logoFihnec} alt="Logotipo FIHNEC" className="h-10 w-auto" />
           <div className="leading-tight">
             <p className="font-display text-sm font-bold text-parchment">SAEL Hombres · FIHNEC</p>
-            <p className="text-[10px] uppercase tracking-wide text-flame">
-              Seminario Avanzado de Entrenamiento de Líderes
-            </p>
           </div>
         </Link>
         <Link

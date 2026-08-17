@@ -5,6 +5,14 @@ Todos los cambios notables de este proyecto se documentan en este archivo.
 Formato basado en [Keep a Changelog](https://keepachangelog.com/es/1.0.0/).
 Convención de versión: PATCH = solo backend, MINOR = toca frontend, MAJOR = mutuo acuerdo.
 
+## [0.6.0] - 2026-08-16
+
+### Added
+- Tablas `participantes` e `inscripciones` en base de datos
+- Endpoints: `GET /api/participantes/dni/:dni` (verificar duplicado), `POST /api/participantes` (registro nuevo), `POST /api/inscripciones` (inscribir a evento)
+- Wizard de inscripción público de 6 pasos (`Registro.jsx`) en `/registro`: DNI → datos personales → ubicación → datos FIHNEC → contacto de emergencia → confirmación
+- Detección automática de DNI existente: si ya está registrado, salta directo a confirmar inscripción al evento actual sin repetir el formulario
+
 ## [0.5.0] - 2026-08-16
 
 ### Changed

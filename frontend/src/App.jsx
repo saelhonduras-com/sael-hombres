@@ -1,6 +1,8 @@
 import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import Navbar from './components/Navbar.jsx';
+import Footer from './components/Footer.jsx';
 import Home from './pages/Home.jsx';
+import Registro from './pages/Registro.jsx';
 
 function Proximamente({ titulo }) {
   return (
@@ -19,10 +21,11 @@ function App() {
       <Navbar />
       <Routes>
         <Route path="/" element={<Home />} />
-        <Route path="/registro" element={<Proximamente titulo="Formulario de inscripción" />} />
+        <Route path="/registro" element={<Registro />} />
         <Route path="/autoconsulta" element={<Proximamente titulo="Consulta tu información" />} />
         <Route path="/admin" element={<Proximamente titulo="Panel administrativo" />} />
       </Routes>
+      <Footer />
     </BrowserRouter>
   );
 }
