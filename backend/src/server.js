@@ -5,6 +5,8 @@ const express = require('express');
 const cors = require('cors');
 
 const saludRoutes = require('./routes/salud');
+const eventosRoutes = require('./routes/eventos');
+const participantesRoutes = require('./routes/participantes');
 
 const app = express();
 
@@ -13,6 +15,8 @@ app.use(express.json());
 
 // Rutas
 app.use('/api', saludRoutes);
+app.use('/api', eventosRoutes);
+app.use('/api', participantesRoutes);
 
 // Manejador de errores centralizado
 app.use((err, req, res, next) => {
