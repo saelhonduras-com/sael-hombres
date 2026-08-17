@@ -3,16 +3,24 @@
 
 @theme {
   --color-ink: #1F1611;
-  --color-night: #241012;
-  --color-night-2: #2E1418;
-  --color-ember: #E31E24;
-  --color-ember-light: #F0453E;
-  --color-gold: #C89B5C;
-  --color-gold-light: #DFC08C;
-  --color-gold-pale: #F3E6CE;
-  --color-flame: #F7941D;
-  --color-palm: #1B7A3D;
-  --color-palm-light: #3F9A5C;
+  --color-night: #1F3464;
+  --color-night-2: #2A4A85;
+
+  /* Paleta oficial FGBMFI/FIHNEC — Manual de Marca, colores primarios */
+  --color-ember: #E40521;
+  --color-gold: #FDC41F;
+  --color-palm: #007334;
+  --color-palm-light: #3D9A5E;
+
+  /* Colores secundarios/degradados oficiales, usados como acento */
+  --color-ember-light: #EC671A;
+  --color-flame: #F59D24;
+  --color-gold-pale: #E9CFAE;
+  --color-gold-light: #F59D24;
+
+  /* Colores complementarios oficiales */
+  --color-blue: #1D71B8;
+
   --color-parchment: #FBF6EC;
   --color-parchment-2: #F3EAD3;
 
