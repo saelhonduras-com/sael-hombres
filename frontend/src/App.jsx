@@ -1,31 +1,65 @@
-import { BrowserRouter, Routes, Route } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import Navbar from './components/Navbar.jsx';
 import Footer from './components/Footer.jsx';
+import RutaProtegida from './components/RutaProtegida.jsx';
 import Home from './pages/Home.jsx';
 import Registro from './pages/Registro.jsx';
+import Login from './pages/admin/Login.jsx';
+import AdminLayout from './pages/admin/AdminLayout.jsx';
+import AdminEventos from './pages/admin/AdminEventos.jsx';
+import AdminParticipantes from './pages/admin/AdminParticipantes.jsx';
+import AdminDiplomas from './pages/admin/AdminDiplomas.jsx';
+import AdminSaelistas from './pages/admin/AdminSaelistas.jsx';
+import AdminHabitaciones from './pages/admin/AdminHabitaciones.jsx';
+import AdminEntradasSalidas from './pages/admin/AdminEntradasSalidas.jsx';
+import AdminControlIngresosEgresos from './pages/admin/AdminControlIngresosEgresos.jsx';
+import AdminCatalogoCuentas from './pages/admin/AdminCatalogoCuentas.jsx';
+import AdminUsuarios from './pages/admin/AdminUsuarios.jsx';
 
-function Proximamente({ titulo }) {
+function PaginaPublica({ children }) {
   return (
-    <div className="flex min-h-[60vh] items-center justify-center bg-parchment px-5 text-center">
-      <div>
-        <h1 className="font-display text-2xl font-bold text-ink">{titulo}</h1>
-        <p className="mt-2 text-ink/50">Próximamente — este módulo está en construcción.</p>
-      </div>
-    </div>
+    <>
+      <Navbar />
+      {children}
+      <Footer />
+    </>
   );
 }
 
 function App() {
   return (
     <BrowserRouter>
-      <Navbar />
       <Routes>
-        <Route path="/" element={<Home />} />
-        <Route path="/registro" element={<Registro />} />
-        <Route path="/autoconsulta" element={<Proximamente titulo="Consulta tu información" />} />
-        <Route path="/admin" element={<Proximamente titulo="Panel administrativo" />} />
+        <Route path="/" element={<PaginaPublica><Home /></PaginaPublica>} />
+        <Route path="/registro" element={<PaginaPublica><Registro /></PaginaPublica>} />
+        <Route path="/admin/login" element={<><Navbar /><Login /></>} />
+        <Route
+          path="/admin"
+          element={
+            <RutaProtegida>
+              <AdminLayout />
+            </RutaProtegida>
+          }
+        >
+          <Route index element={<Navigate to="/admin/eventos" replace />} />
+          <Route path="eventos" element={<AdminEventos />} />
+          <Route path="participantes" element={<AdminParticipantes />} />
+          <Route path="diplomas" element={<AdminDiplomas />} />
+          <Route path="saelistas" element={<AdminSaelistas />} />
+          <Route path="habitaciones" element={<AdminHabitaciones />} />
+          <Route path="entradas-y-salidas" element={<AdminEntradasSalidas />} />
+          <Route path="control-de-ingresos-egresos" element={<AdminControlIngresosEgresos />} />
+          <Route path="catalogo-de-cuentas" element={<AdminCatalogoCuentas />} />
+          <Route
+            path="usuarios"
+            element={
+              <RutaProtegida rolesPermitidos={['super_admin']}>
+                <AdminUsuarios />
+              </RutaProtegida>
+            }
+          />
+        </Route>
       </Routes>
-      <Footer />
     </BrowserRouter>
   );
 }

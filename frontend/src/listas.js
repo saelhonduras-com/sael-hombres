@@ -75,7 +75,8 @@ export const ZONAS_FIHNEC = [
   "Sur a"
 ];
 
-// Igual al catálogo de SFL, sin "Servidor del SFL" (no aplica a SAEL)
+// Igual al catálogo de SFL, sin "Servidor del SFL" (no aplica a SAEL) —
+// se usa para "Cargo actual" del participante y también del Saelista.
 export const CARGOS_FIHNEC = [
   "Presidente de JDN",
   "Vice Presidente JDN",
@@ -128,3 +129,43 @@ export const CARGOS_FIHNEC = [
 
 // Igual al catálogo de SFL, con "Unión Libre" agregado (requerido por SAEL)
 export const ESTADOS_CIVILES = ["Soltero", "Casado", "Viudo", "Divorciado", "Unión Libre"];
+
+// ============================================================
+// Catálogos del módulo Saelistas
+// ============================================================
+
+// "Cargos desempeñados (histórico)" del Saelista — a diferencia de
+// CARGOS_FIHNEC (cargo actual), aquí SÍ se incluye "Servidor del SFL",
+// porque es un registro de vida completo, incluyendo su paso por SFL.
+export const CARGOS_HISTORICO = [...CARGOS_FIHNEC, "Servidor del SFL"];
+
+export const TIPOS_TESTIMONIO = [
+  "No comparte",
+  "Personal",
+  "Familiar",
+  "Matrimonio",
+  "Internacional",
+  "Otro",
+];
+
+export const FORMACION_OFICIAL = [
+  "Escuela de la Visión",
+  "LGMFT",
+  "SAEL",
+  "SFL I",
+  "SFL II",
+  "SFL III",
+  "SFL IV",
+  "SEMAT",
+  "SEPREL",
+];
+
+export const OTRAS_PARTICIPACIONES = [
+  "Encuentros Zonales",
+  "Encuentros Nacionales",
+  "Convenciones Nacionales",
+  "Convención Internacional",
+  "Vigilias de Capítulo",
+  "Vigilias Zonales",
+  "Vigilias de Equipo",
+];

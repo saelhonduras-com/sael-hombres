@@ -9,8 +9,8 @@ const MESES = [
 ];
 
 function formatearRango(inicio, fin) {
-  const fi = new Date(inicio + 'T00:00:00');
-  const ff = new Date(fin + 'T00:00:00');
+  const fi = new Date(inicio);
+  const ff = new Date(fin);
   const mismomes = fi.getMonth() === ff.getMonth();
   const diaIni = fi.getDate();
   const diaFin = ff.getDate();
@@ -57,12 +57,6 @@ export default function Home() {
             >
               Inscríbete aquí
             </Link>
-            <Link
-              to="/autoconsulta"
-              className="rounded-full border border-parchment/30 px-7 py-3 font-semibold text-parchment transition hover:bg-parchment/10"
-            >
-              Consulta tu información
-            </Link>
           </div>
 
           {eventoActual?.fecha_limite_registro && (
@@ -75,7 +69,7 @@ export default function Home() {
       </section>
 
       {/* PRÓXIMO ENCUENTRO */}
-      <section className="mx-auto max-w-4xl px-5 py-16">
+      <section className="mx-auto max-w-2xl px-5 py-16">
         <h2 className="text-center font-display text-3xl font-bold text-ink sm:text-4xl">Próximo encuentro SAEL</h2>
         <p className="mx-auto mt-3 max-w-xl text-center text-ink/60">
           Cada mes es una puerta nueva. No necesitas haber asistido antes para inscribirte.
