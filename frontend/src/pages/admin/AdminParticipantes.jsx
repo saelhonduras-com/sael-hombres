@@ -160,7 +160,7 @@ export default function AdminParticipantes() {
     } else {
       cargarParticipantes(filtrosRef.current, 1, true);
     }
-    api.get('/admin/participantes/estadisticas').then(({ data }) => setEstadisticas(data)).catch(() => {});
+    api.get('/admin/participantes/estadisticas', eventoActual ? { params: { evento_id: eventoActual.id } } : undefined).then(({ data }) => setEstadisticas(data)).catch(() => {});
   }
 
   useEffect(() => {
@@ -337,7 +337,7 @@ export default function AdminParticipantes() {
           await api.delete(`/admin/inscripciones/${inscripcionId}`);
           setInscripcionesActual((prev) => prev.filter((i) => i.inscripcion_id !== inscripcionId));
           setTotalActual((prev) => Math.max(prev - 1, 0));
-          api.get('/admin/participantes/estadisticas').then(({ data }) => setEstadisticas(data)).catch(() => {});
+          api.get('/admin/participantes/estadisticas', eventoActual ? { params: { evento_id: eventoActual.id } } : undefined).then(({ data }) => setEstadisticas(data)).catch(() => {});
         } catch (err) {
           setError(mensajeError(err));
         }
@@ -347,14 +347,13 @@ export default function AdminParticipantes() {
 
   // --- Estadísticas + evento actual (una vez) ---
   useEffect(() => {
-    api.get('/admin/participantes/estadisticas')
-      .then(({ data }) => setEstadisticas(data))
-      .catch(() => {});
     api.get('/eventos')
       .then(({ data }) => {
         const actual = data.find((e) => e.es_actual) || data.find((e) => e.abierto);
         setEventoActual(actual || null);
+        return api.get('/admin/participantes/estadisticas', actual ? { params: { evento_id: actual.id } } : undefined);
       })
+      .then(({ data }) => setEstadisticas(data))
       .catch(() => {});
   }, []);
 
@@ -387,7 +386,7 @@ export default function AdminParticipantes() {
           const { data } = await api.get('/eventos');
           const nuevoActual = data.find((e) => e.es_actual) || data.find((e) => e.abierto);
           setEventoActual(nuevoActual || null);
-          api.get('/admin/participantes/estadisticas').then(({ data }) => setEstadisticas(data)).catch(() => {});
+          api.get('/admin/participantes/estadisticas', nuevoActual ? { params: { evento_id: nuevoActual.id } } : undefined).then(({ data }) => setEstadisticas(data)).catch(() => {});
         } catch (err) {
           setError(mensajeError(err));
         }
@@ -405,7 +404,7 @@ export default function AdminParticipantes() {
           await api.put(`/admin/participantes/${id}/ocultar`);
           setParticipantes((prev) => prev.filter((p) => p.id !== id));
           setTotal((prev) => Math.max(prev - 1, 0));
-          api.get('/admin/participantes/estadisticas').then(({ data }) => setEstadisticas(data)).catch(() => {});
+          api.get('/admin/participantes/estadisticas', eventoActual ? { params: { evento_id: eventoActual.id } } : undefined).then(({ data }) => setEstadisticas(data)).catch(() => {});
           if (seleccionado?.id === id) {
             setSeleccionado(null);
             setVista('lista');
@@ -485,7 +484,7 @@ export default function AdminParticipantes() {
       setVista('lista');
       cargarParticipantes(filtrosRef.current, 1, true);
       if (modoLista === 'actual' && eventoActual) cargarInscripcionesEventoActual(buscarActual);
-      api.get('/admin/participantes/estadisticas').then(({ data }) => setEstadisticas(data)).catch(() => {});
+      api.get('/admin/participantes/estadisticas', eventoActual ? { params: { evento_id: eventoActual.id } } : undefined).then(({ data }) => setEstadisticas(data)).catch(() => {});
     } catch (err) {
       setError(mensajeError(err));
     } finally {
@@ -583,7 +582,7 @@ export default function AdminParticipantes() {
                       <div className="mt-2 overflow-x-auto rounded-2xl border border-ink/10 bg-white shadow-sm">
                         <table className="w-full text-sm">
                           <thead>
-                            <tr className="border-b border-ink/10 text-left text-xs uppercase tracking-wide text-ink/40">
+                            <tr className="border-b border-ink/10 bg-[#1F3464]/12 text-left text-xs uppercase tracking-wide text-[#1F3464]">
                               <th className="px-4 py-3">Nombre</th>
                               <th className="px-4 py-3">Identificación</th>
                               <th className="px-4 py-3">Capítulo</th>
@@ -677,7 +676,7 @@ export default function AdminParticipantes() {
                   <div className="mt-4 overflow-x-auto rounded-2xl border border-ink/10 bg-white shadow-sm">
                     <table className="w-full text-sm">
                       <thead>
-                        <tr className="border-b border-ink/10 text-left text-xs uppercase tracking-wide text-ink/40">
+                        <tr className="border-b border-ink/10 bg-[#1F3464]/12 text-left text-xs uppercase tracking-wide text-[#1F3464]">
                           <th className="px-4 py-3">Nombre</th>
                           <th className="px-4 py-3">Identificación</th>
                           <th className="px-4 py-3">Tipo</th>

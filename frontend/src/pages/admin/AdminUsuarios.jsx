@@ -173,7 +173,7 @@ export default function AdminUsuarios() {
       ) : (
         <div className="overflow-hidden rounded-xl border border-ink/10 bg-white">
           <table className="w-full text-sm">
-            <thead className="bg-ink/5 text-left text-xs font-semibold uppercase tracking-wide text-ink/50">
+            <thead className="bg-[#92660A]/12 text-left text-xs font-semibold uppercase tracking-wide text-[#92660A]">
               <tr>
                 <th className="px-4 py-3">Nombre</th>
                 <th className="px-4 py-3">Correo</th>

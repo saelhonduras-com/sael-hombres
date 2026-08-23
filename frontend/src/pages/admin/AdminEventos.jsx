@@ -12,6 +12,13 @@ const vacio = {
   abierto: true, es_actual: false,
 };
 
+// Honduras es UTC-6 todo el año — mismo cálculo que usa el backend, para que
+// el bloqueo se sienta consistente aunque esto solo sea la capa de aviso.
+function mesEnCursoHonduras() {
+  const ahoraHN = new Date(Date.now() - 6 * 60 * 60 * 1000);
+  return { mes: ahoraHN.getUTCMonth() + 1, anio: ahoraHN.getUTCFullYear() };
+}
+
 // Cuenta regresiva a la fecha límite de registro, mismo estilo que el
 // contador del hero público (días / horas / min). Regresa null si ya venció.
 function calcularCuentaRegresiva(fechaLimite) {
@@ -27,9 +34,9 @@ function calcularCuentaRegresiva(fechaLimite) {
 
 function CajaTiempo({ valor, etiqueta }) {
   return (
-    <div className="rounded-lg bg-night px-2.5 py-1 text-center text-white">
-      <p className="font-display text-base font-bold leading-none">{String(valor).padStart(2, '0')}</p>
-      <p className="text-[9px] uppercase tracking-wide text-white/60">{etiqueta}</p>
+    <div className="rounded-md bg-night px-2 py-0.5 text-center text-white">
+      <p className="font-display text-sm font-bold leading-none">{String(valor).padStart(2, '0')}</p>
+      <p className="text-[8px] uppercase tracking-wide text-white/60">{etiqueta}</p>
     </div>
   );
 }
@@ -43,6 +50,8 @@ export default function AdminEventos() {
   const [form, setForm] = useState(vacio);
   const [guardando, setGuardando] = useState(false);
   const [confirmacion, setConfirmacion] = useState(null); // { mensaje, textoConfirmar, onConfirmar } | null
+  const [negacion, setNegacion] = useState(false); // true = mostrar el modal de "esto no se puede"
+  const [bloqueoMes, setBloqueoMes] = useState(null); // string | null = mensaje del bloqueo duro por mes en curso
   const [, setTick] = useState(0); // fuerza recalcular la cuenta regresiva cada 30s
 
   useEffect(() => {
@@ -89,6 +98,28 @@ export default function AdminEventos() {
   }
 
   async function guardar() {
+    const { mes: mesHoy, anio: anioHoy } = mesEnCursoHonduras();
+    const eventoDelMes = eventos.find((e) => Number(e.mes) === mesHoy && Number(e.anio) === anioHoy);
+
+    // Bloqueo duro: mientras el mes en curso tenga su propio evento, nada de
+    // marcar otro evento como actual, abrir otro evento, ni quitarle "actual"
+    // al del mes en curso. Sin excepciones — se libera solo cuando cambie el mes.
+    if (eventoDelMes) {
+      const esElDelMes = String(eventoDelMes.id) === String(editando);
+      const intentaCambiarloAOtro = !esElDelMes && (form.es_actual || form.abierto);
+      const intentaQuitarleActual = esElDelMes && eventoDelMes.es_actual && !form.es_actual;
+      if (intentaCambiarloAOtro || intentaQuitarleActual) {
+        setBloqueoMes(
+          `No se puede cambiar el evento actual ni su registro mientras estemos en el mes de "${eventoDelMes.nombre}". Este bloqueo es intencional — se libera solo cuando cambie el mes.`
+        );
+        return;
+      }
+    }
+
+    if (form.abierto && !form.es_actual) {
+      setNegacion(true);
+      return;
+    }
     setGuardando(true);
     setError('');
     try {
@@ -129,7 +160,7 @@ export default function AdminEventos() {
       <div className="flex items-center justify-between">
         <h1 className="font-display text-2xl font-bold text-ink">Eventos</h1>
         {!editando && (
-          <button onClick={abrirNuevo} className="rounded-full bg-ember px-5 py-2 text-sm font-semibold text-white hover:bg-ember-light">
+          <button onClick={abrirNuevo} className="rounded-full bg-ember/10 px-5 py-2 text-sm font-semibold text-ember hover:bg-ember/20">
             + Nuevo evento
           </button>
         )}
@@ -175,10 +206,15 @@ export default function AdminEventos() {
               <input type="checkbox" checked={form.es_actual} onChange={(e) => setForm((f) => ({ ...f, es_actual: e.target.checked }))} />
               <span className="text-sm text-ink/70">Marcar como evento actual</span>
             </label>
+            {form.es_actual && eventos.some((e) => e.es_actual && e.id !== editando) && (
+              <p className="sm:col-span-2 rounded-lg bg-flame/10 px-3 py-2 text-xs text-flame">
+                ⚠️ Esto reemplazará a "{eventos.find((e) => e.es_actual && e.id !== editando)?.nombre}" como el evento actual.
+              </p>
+            )}
           </div>
           <div className="mt-6 flex justify-end gap-3">
             <button onClick={() => setEditando(null)} className="rounded-full border border-ink/20 px-5 py-2 text-sm font-semibold text-ink/70 hover:bg-ink/5">Cancelar</button>
-            <button onClick={guardar} disabled={guardando} className="rounded-full bg-ember px-5 py-2 text-sm font-semibold text-white hover:bg-ember-light disabled:opacity-50">
+            <button onClick={guardar} disabled={guardando} className="rounded-full bg-ember/10 px-5 py-2 text-sm font-semibold text-ember hover:bg-ember/20 disabled:opacity-50">
               {guardando ? 'Guardando…' : 'Guardar'}
             </button>
           </div>
@@ -187,50 +223,48 @@ export default function AdminEventos() {
 
       {!editando && (
         cargando ? <p className="mt-6 text-ink/40">Cargando…</p> : (
-          <div className="mt-4 space-y-3">
+          <div className="mt-4 space-y-2">
             {eventos.length === 0 && <p className="text-sm text-ink/40">Sin eventos registrados todavía.</p>}
             {eventos.map((ev) => {
               const cuenta = ev.abierto ? calcularCuentaRegresiva(ev.fecha_limite_registro.slice(0, 10)) : null;
               const conteo = conteos[ev.id];
               return (
-                <div key={ev.id} className="flex flex-wrap items-center justify-between gap-4 rounded-2xl border border-ink/10 bg-white p-4 shadow-sm">
+                <div key={ev.id} className="flex flex-wrap items-center gap-x-6 gap-y-2 rounded-xl border border-ink/10 bg-white p-3 shadow-sm">
                   <div>
-                    <p className="font-semibold text-ink">
-                      {ev.nombre} {ev.es_actual && <span className="ml-2 rounded-full bg-flame/15 px-2 py-0.5 text-xs font-semibold text-flame">Actual</span>}
+                    <p className="flex flex-wrap items-center gap-2">
+                      <span className="font-semibold text-ink">{ev.nombre}</span>
+                      {ev.es_actual && (
+                        <span className="shrink-0 rounded-full bg-flame/15 px-2 py-0.5 text-[10px] font-semibold text-flame">Actual</span>
+                      )}
+                      <span className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold ${ev.abierto ? 'bg-[#007334]/10 text-[#007334]' : 'bg-ink/10 text-ink/50'}`}>
+                        {ev.abierto ? 'Abierto' : 'Cerrado'}
+                      </span>
                     </p>
-                    <p className="text-xs text-ink/50">
-                      {ev.fecha_inicio.slice(0, 10)} al {ev.fecha_fin.slice(0, 10)} · Límite: {ev.fecha_limite_registro.slice(0, 10)} · {ev.abierto ? 'Abierto' : 'Cerrado'}
+                    <p className="mt-0.5 text-xs text-ink/50">
+                      {ev.fecha_inicio.slice(0, 10)} al {ev.fecha_fin.slice(0, 10)} · Límite: {ev.fecha_limite_registro.slice(0, 10)}
                     </p>
                   </div>
 
-                  <div className="flex items-center gap-5">
-                    {conteo && (
-                      <div className="flex gap-4">
-                        <div className="text-center">
-                          <p className="font-display text-lg font-bold text-ink">{conteo.total}</p>
-                          <p className="text-[10px] uppercase tracking-wide text-ink/40">Inscritos</p>
-                        </div>
-                        <div className="text-center">
-                          <p className="font-display text-lg font-bold text-ink">{conteo.confirmados}</p>
-                          <p className="text-[10px] uppercase tracking-wide text-ink/40">Confirmados</p>
-                        </div>
-                      </div>
-                    )}
+                  {conteo && (
+                    <div className="flex gap-4 text-xs text-ink/60">
+                      <span><strong className="font-display text-ink">{conteo.total}</strong> inscritos</span>
+                      <span><strong className="font-display text-ink">{conteo.confirmados}</strong> confirmados</span>
+                    </div>
+                  )}
 
-                    {cuenta && (
-                      <div className="flex gap-1.5">
-                        <CajaTiempo valor={cuenta.dias} etiqueta="Días" />
-                        <CajaTiempo valor={cuenta.horas} etiqueta="Hrs" />
-                        <CajaTiempo valor={cuenta.minutos} etiqueta="Min" />
-                      </div>
-                    )}
-                  </div>
+                  {cuenta && (
+                    <div className="flex gap-1">
+                      <CajaTiempo valor={cuenta.dias} etiqueta="Días" />
+                      <CajaTiempo valor={cuenta.horas} etiqueta="Hrs" />
+                      <CajaTiempo valor={cuenta.minutos} etiqueta="Min" />
+                    </div>
+                  )}
 
-                  <div className="flex gap-2">
-                    <button onClick={() => abrirEditar(ev)} className="rounded-full bg-[#007334] px-3 py-1 text-xs font-semibold text-white hover:bg-[#005c29]">
+                  <div className="ml-auto flex shrink-0 gap-2">
+                    <button onClick={() => abrirEditar(ev)} className="rounded-full bg-[#007334]/10 px-3 py-1 text-xs font-semibold text-[#007334] hover:bg-[#007334]/20">
                       Editar
                     </button>
-                    <button onClick={() => eliminar(ev.id, ev.nombre)} className="rounded-full bg-ember px-3 py-1 text-xs font-semibold text-white hover:bg-ember-light">
+                    <button onClick={() => eliminar(ev.id, ev.nombre)} className="rounded-full bg-ember/10 px-3 py-1 text-xs font-semibold text-ember hover:bg-ember/20">
                       Eliminar
                     </button>
                   </div>
@@ -264,11 +298,75 @@ export default function AdminEventos() {
                   setConfirmacion(null);
                   accion();
                 }}
-                className="rounded-full bg-ember px-4 py-1.5 text-sm font-semibold text-white hover:bg-ember-light"
+                className="rounded-full border border-ember/30 bg-ember/10 px-4 py-1.5 text-sm font-semibold text-ember hover:bg-ember/20"
               >
                 {confirmacion.textoConfirmar}
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {negacion && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink/40 px-4">
+          <div className="w-full max-w-sm rounded-2xl bg-white p-6 shadow-lg">
+            <div className="flex items-center gap-3">
+              <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-ember/10 text-xl">
+                🚫
+              </span>
+              <h3 className="font-display text-lg font-bold text-ink">No se puede abrir este evento</h3>
+            </div>
+
+            <p className="mt-3 text-sm text-ink/60">
+              Solo el evento <strong>actual</strong> puede aceptar inscripciones. Este evento no está marcado
+              como actual, así que no puede quedar abierto — el sistema no permite tener dos eventos
+              recibiendo registros al mismo tiempo.
+            </p>
+            <p className="mt-2 text-sm font-semibold text-ink/70">¿Qué quieres hacer?</p>
+
+            <div className="mt-4 flex flex-col gap-2">
+              <button
+                onClick={() => { setForm((f) => ({ ...f, es_actual: true })); setNegacion(false); }}
+                className="rounded-full border border-[#007334]/30 bg-[#007334]/10 px-4 py-2 text-sm font-semibold text-[#007334] hover:bg-[#007334]/20"
+              >
+                Marcarlo como evento actual y abrirlo
+              </button>
+              <button
+                onClick={() => { setForm((f) => ({ ...f, abierto: false })); setNegacion(false); }}
+                className="rounded-full border border-ink/20 px-4 py-2 text-sm font-semibold text-ink/70 hover:bg-ink/5"
+              >
+                Dejarlo cerrado
+              </button>
+            </div>
+
+            <button
+              onClick={() => setNegacion(false)}
+              className="mt-4 w-full text-center text-xs font-semibold text-ink/40 hover:text-ink/60"
+            >
+              Cancelar y seguir editando
+            </button>
+          </div>
+        </div>
+      )}
+
+      {bloqueoMes && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink/40 px-4">
+          <div className="w-full max-w-sm rounded-2xl bg-white p-6 shadow-lg">
+            <div className="flex items-center gap-3">
+              <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-ink/10 text-xl">
+                🔒
+              </span>
+              <h3 className="font-display text-lg font-bold text-ink">Esto está bloqueado</h3>
+            </div>
+
+            <p className="mt-3 text-sm text-ink/60">{bloqueoMes}</p>
+
+            <button
+              onClick={() => setBloqueoMes(null)}
+              className="mt-6 w-full rounded-full border border-ink/20 px-4 py-2 text-sm font-semibold text-ink/70 hover:bg-ink/5"
+            >
+              Entendido
+            </button>
           </div>
         </div>
       )}

@@ -3,8 +3,8 @@ import { useOutletContext } from 'react-router-dom';
 import api, { mensajeError } from '../../api';
 
 const claseInput = 'w-full rounded-lg border border-ink/15 px-3 py-2 text-sm focus:border-ember focus:outline-none';
-const btnEditar = 'rounded-full bg-[#007334] px-3 py-1 text-xs font-semibold text-white hover:bg-[#005c29]';
-const btnEliminar = 'rounded-full bg-ember px-3 py-1 text-xs font-semibold text-white hover:bg-ember-light';
+const btnEditar = 'rounded-full bg-[#007334]/10 px-3 py-1 text-xs font-semibold text-[#007334] hover:bg-[#007334]/20';
+const btnEliminar = 'rounded-full bg-ember/10 px-3 py-1 text-xs font-semibold text-ember hover:bg-ember/20';
 
 const vacio = { codigo: '', nombre: '', tipo: 'ingreso', cuenta_padre_id: '', origen: 'manual', orden: '0' };
 
@@ -97,8 +97,15 @@ export default function AdminCatalogoCuentas() {
   }
 
   function eliminar(cuenta) {
+    const esComidaCalculada = cuenta.tipo_calculo === 'comida_evento' || cuenta.tipo_calculo === 'comida_vigilia';
+    const esIsv = cuenta.tipo_calculo === 'isv_alimentacion_evento';
+    const advertenciaComida = esComidaCalculada
+      ? ' ⚠️ ESTA CUENTA ESTÁ CONECTADA AL CÁLCULO AUTOMÁTICO DE COMIDA — su cantidad y monto se calculan solos según quién esté Registrado o tenga asistencia marcada. Si la borras, ese cálculo deja de funcionar para esta comida.'
+      : esIsv
+      ? ' ⚠️ ESTA CUENTA CALCULA SOLA EL 15% DE ISV sobre las 5 comidas del evento. Si la borras, ese cálculo deja de aparecer en el reporte.'
+      : '';
     pedirConfirmacion({
-      mensaje: `Se eliminará "${cuenta.codigo} ${cuenta.nombre}" — y también todas sus cuentas hijas y cualquier renglón manual que tuvieran registrado. Esta acción no se puede deshacer.`,
+      mensaje: `Se eliminará "${cuenta.codigo} ${cuenta.nombre}" — y también todas sus cuentas hijas y cualquier renglón manual que tuvieran registrado. Esta acción no se puede deshacer.${advertenciaComida}`,
       textoConfirmar: 'Sí, eliminar',
       onConfirmar: async () => {
         setError('');
@@ -141,6 +148,11 @@ export default function AdminCatalogoCuentas() {
         Estas cuentas se usan en Control de Ingresos, Control de Egresos y el Resumen Financiero. Agrega, edita o
         elimina las que necesites — se reutilizan en todos esos módulos automáticamente.
       </p>
+      <div className="mt-2 space-y-0.5">
+        <p className="text-xs text-ink/40">🔒 = esta cuenta está conectada a un cálculo automático del sistema — puedes renombrarla o recodificarla libremente, pero si la eliminas, ese cálculo deja de tener dónde guardar su resultado.</p>
+        <p className="text-xs text-ink/40">🍽️ = comida con cantidad calculada sola (Registrados y/o Saelistas) — el precio se configura en Entradas & Salidas, no aquí.</p>
+        <p className="text-xs text-ink/40">🧾 = calcula sola el 15% de ISV sobre las 5 comidas del evento — no tiene nada que configurar, es automática.</p>
+      </div>
 
       {error && <p className="mt-4 rounded-lg bg-ember/10 p-3 text-sm text-ember">{error}</p>}
 
@@ -148,7 +160,7 @@ export default function AdminCatalogoCuentas() {
         <div className="mt-4 overflow-hidden rounded-2xl border border-ink/10 bg-white shadow-sm">
           <table className="w-full text-sm">
             <thead>
-              <tr className="border-b border-ink/10 text-left text-xs uppercase tracking-wide text-ink/40">
+              <tr className="border-b border-ink/10 bg-[#1F3464]/12 text-left text-xs uppercase tracking-wide text-[#1F3464]">
                 <th className="px-3 py-3">Código</th>
                 <th className="px-3 py-3">Cuenta</th>
                 <th className="px-3 py-3">Tipo</th>
@@ -175,6 +187,8 @@ export default function AdminCatalogoCuentas() {
                     <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase ${ORIGEN_COLOR[c.origen]}`}>
                       {ORIGEN_LABEL[c.origen]}
                       {c.clave_sistema ? ' 🔒' : ''}
+                      {(c.tipo_calculo === 'comida_evento' || c.tipo_calculo === 'comida_vigilia') ? ' 🍽️' : ''}
+                      {c.tipo_calculo === 'isv_alimentacion_evento' ? ' 🧾' : ''}
                     </span>
                   </td>
                   <td className="px-3 py-2 text-right whitespace-nowrap">
@@ -194,8 +208,6 @@ export default function AdminCatalogoCuentas() {
           </table>
         </div>
       )}
-      <p className="mt-2 text-xs text-ink/40">🔒 = esta cuenta está conectada a un cálculo automático del sistema — puedes renombrarla o recodificarla libremente, pero si la eliminas, ese cálculo deja de tener dónde guardar su resultado.</p>
-
       {editandoId && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink/40 px-4">
           <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-lg">

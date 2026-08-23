@@ -283,20 +283,44 @@ router.get('/admin/participantes', requireAuth, requireModulo('participantes', '
 
 // Admin: estadísticas rápidas (para la columna de resumen del panel)
 router.get('/admin/participantes/estadisticas', requireAuth, requireModulo('participantes', 'consulta'), async (req, res) => {
+  const { evento_id } = req.query;
   try {
-    const confirmados = await pool.query(
-      `SELECT tipo_participante, COUNT(*) AS total
-       FROM participantes
-       WHERE oculto = false
-         AND EXISTS (SELECT 1 FROM inscripciones i WHERE i.participante_id = participantes.id AND i.registrado_presencial = true)
-       GROUP BY tipo_participante`
-    );
+    // Con evento_id: cuenta solo lo de ESE evento (esto es lo que hace
+    // que el resumen se "limpie" al pasar a un evento nuevo — no se
+    // borra nada, simplemente el evento nuevo todavía no tiene
+    // inscripciones/asistencias propias que contar). Sin evento_id:
+    // se mantiene el comportamiento global de antes, por si algo más
+    // llega a llamar este endpoint sin mandar el parámetro.
+    const confirmados = evento_id
+      ? await pool.query(
+          `SELECT p.tipo_participante, COUNT(*) AS total
+           FROM participantes p
+           JOIN inscripciones i ON i.participante_id = p.id
+           WHERE p.oculto = false AND i.evento_id = $1 AND i.registrado_presencial = true
+           GROUP BY p.tipo_participante`,
+          [evento_id]
+        )
+      : await pool.query(
+          `SELECT tipo_participante, COUNT(*) AS total
+           FROM participantes
+           WHERE oculto = false
+             AND EXISTS (SELECT 1 FROM inscripciones i WHERE i.participante_id = participantes.id AND i.registrado_presencial = true)
+           GROUP BY tipo_participante`
+        );
     // "Inscritos" = todas las personas que han pasado por el sistema alguna
     // vez (confirmadas o todavía esperando su chequeo presencial). Distinto
     // de "Confirmados", que es el mismo total ya usado en el resto del panel.
-    const inscritosTotal = await pool.query(
-      `SELECT COUNT(*) FROM participantes WHERE oculto = false`
-    );
+    const inscritosTotal = evento_id
+      ? await pool.query(
+          `SELECT COUNT(*) FROM inscripciones i
+           JOIN participantes p ON p.id = i.participante_id
+           WHERE p.oculto = false AND i.evento_id = $1`,
+          [evento_id]
+        )
+      : await pool.query(`SELECT COUNT(*) FROM participantes WHERE oculto = false`);
+    const saelistasAsistencia = evento_id
+      ? await pool.query(`SELECT COUNT(*) FROM saelista_asistencias WHERE evento_id = $1 AND registrado_presencial = true`, [evento_id])
+      : await pool.query(`SELECT COUNT(*) FROM saelista_asistencias WHERE registrado_presencial = true`);
     const estadisticas = { total: 0, nacional: 0, extranjero: 0 };
     confirmados.rows.forEach((r) => {
       const cantidad = parseInt(r.total, 10);
@@ -304,6 +328,7 @@ router.get('/admin/participantes/estadisticas', requireAuth, requireModulo('part
       estadisticas.total += cantidad;
     });
     estadisticas.inscritos_total = parseInt(inscritosTotal.rows[0].count, 10);
+    estadisticas.saelistas_asistencia = parseInt(saelistasAsistencia.rows[0].count, 10);
     res.json(estadisticas);
   } catch (err) {
     res.status(500).json({ error: 'No se pudieron obtener las estadísticas.' });

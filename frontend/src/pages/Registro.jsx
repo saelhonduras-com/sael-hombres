@@ -7,6 +7,7 @@ import {
 } from '../listas';
 
 const TOTAL_PASOS = 6;
+const NOMBRES_PASOS = ['DNI', 'Datos personales', 'Ubicación', 'Datos FIHNEC', 'Contacto de emergencia', 'Revisión'];
 
 const vacio = {
   dni: '',
@@ -27,14 +28,15 @@ const vacio = {
 
 function Boton({ children, variant = 'red', className = '', ...props }) {
   const colores = {
-    red: 'bg-ember hover:bg-ember-light',
-    green: 'bg-[#007334] hover:bg-[#005c29]',
-    blue: 'bg-[#1F3464] hover:opacity-90',
+    red: 'bg-ember hover:bg-ember-light shadow-sm shadow-ember/20',
+    green: 'bg-[#007334] hover:bg-[#005c29] shadow-sm shadow-[#007334]/20',
+    blue: 'bg-[#1F3464] hover:opacity-90 shadow-sm shadow-[#1F3464]/20',
   };
   return (
     <button
+      type="button"
       {...props}
-      className={`rounded-full px-6 py-2.5 text-sm font-semibold text-white transition disabled:cursor-not-allowed disabled:opacity-50 ${colores[variant]} ${className}`}
+      className={`rounded-full px-6 py-2.5 text-sm font-semibold text-white transition hover:-translate-y-0.5 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ink/40 disabled:pointer-events-none disabled:translate-y-0 disabled:cursor-not-allowed disabled:opacity-50 ${colores[variant]} ${className}`}
     >
       {children}
     </button>
@@ -44,11 +46,38 @@ function Boton({ children, variant = 'red', className = '', ...props }) {
 function BotonSecundario({ children, className = '', ...props }) {
   return (
     <button
+      type="button"
       {...props}
-      className={`rounded-full border border-ink/20 px-6 py-2.5 text-sm font-semibold text-ink/70 transition hover:bg-ink/5 ${className}`}
+      className={`rounded-full border border-ink/20 px-6 py-2.5 text-sm font-semibold text-ink/70 transition hover:bg-ink/5 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ink/40 ${className}`}
     >
       {children}
     </button>
+  );
+}
+
+function Encabezado({ etiqueta }) {
+  return (
+    <div className="mb-6 text-center">
+      <div className="mx-auto flex h-11 w-11 items-center justify-center rounded-full bg-night">
+        <svg width="18" height="18" viewBox="0 0 24 24" className="text-[#FDC41F]" fill="currentColor">
+          <path d="M12 3c-3 3.6-5 6.2-5 9.4a5 5 0 0 0 10 0c0-2.1-.9-3.6-1.9-5 .2 1.5-.4 2.6-1.3 2.6-1 0-1.5-.9-1.2-2 .4-1.9-.2-3.4-.6-5z" />
+        </svg>
+      </div>
+      <p className="mt-3 font-sans text-base font-bold uppercase tracking-[0.2em] text-night">{etiqueta}</p>
+    </div>
+  );
+}
+
+function TarjetaMarca({ children, className = '' }) {
+  return (
+    <div className={`overflow-hidden rounded-2xl border border-ink/10 bg-white shadow-sm ${className}`}>
+      <div className="flex h-1.5">
+        <span className="flex-1 bg-[#E40521]" />
+        <span className="flex-1 bg-[#FDC41F]" />
+        <span className="flex-1 bg-[#007334]" />
+      </div>
+      <div className="p-8">{children}</div>
+    </div>
   );
 }
 
@@ -61,7 +90,20 @@ function Campo({ etiqueta, children }) {
   );
 }
 
-const claseInput = 'w-full rounded-lg border border-ink/15 px-3 py-2.5 text-sm focus:border-ember focus:outline-none';
+// Igual que Campo, pero sin <label>. Un <label> que envuelve más de un
+// elemento activable (ej. dos botones) hace que el navegador intente
+// además activar automáticamente el primero al hacer clic en cualquiera
+// de los dos — eso es lo que causaba que "No" no se quedara seleccionado.
+function CampoGrupo({ etiqueta, children }) {
+  return (
+    <div className="block">
+      <span className="mb-1.5 block text-sm font-semibold text-ink/70">{etiqueta}</span>
+      {children}
+    </div>
+  );
+}
+
+const claseInput = 'w-full rounded-lg border border-ink/15 bg-white px-3 py-2.5 text-sm text-ink transition focus:border-ember focus:outline-none focus:ring-4 focus:ring-ember/10';
 
 export default function Registro() {
   const navigate = useNavigate();
@@ -255,15 +297,30 @@ export default function Registro() {
   // --- Estados especiales ---
 
   if (eventos === null && !error) {
-    return <div className="flex min-h-[60vh] items-center justify-center bg-parchment"><p className="text-ink/40">Cargando…</p></div>;
+    return (
+      <div className="flex min-h-[60vh] items-center justify-center bg-parchment">
+        <div className="flex items-center gap-2 text-sm text-ink/40">
+          <span className="h-4 w-4 animate-spin rounded-full border-2 border-ink/15 border-t-ember" />
+          Cargando…
+        </div>
+      </div>
+    );
   }
 
   if (!eventoActual) {
     return (
-      <div className="flex min-h-[60vh] items-center justify-center bg-parchment px-5 text-center">
-        <div>
-          <h1 className="font-display text-2xl font-bold text-ink">No hay registro abierto</h1>
-          <p className="mt-2 text-ink/50">Todavía no hay un encuentro SAEL con inscripción activa. Vuelve pronto.</p>
+      <div className="flex min-h-[60vh] items-center justify-center bg-parchment px-5">
+        <div className="w-full max-w-md">
+          <TarjetaMarca className="text-center">
+            <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-ink/5">
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-ink/30">
+                <rect x="3" y="4" width="18" height="18" rx="2" />
+                <path d="M16 2v4M8 2v4M3 10h18" />
+              </svg>
+            </div>
+            <h1 className="mt-4 font-display text-2xl font-bold text-ink">No hay registro abierto</h1>
+            <p className="mt-2 text-ink/50">Todavía no hay un encuentro SAEL con inscripción activa. Vuelve pronto.</p>
+          </TarjetaMarca>
         </div>
       </div>
     );
@@ -271,16 +328,22 @@ export default function Registro() {
 
   if (inscripcionCompleta) {
     return (
-      <div className="flex min-h-[60vh] items-center justify-center bg-parchment px-5 text-center">
-        <div>
-          <span className="text-5xl">✅</span>
-          <h1 className="mt-4 font-display text-2xl font-bold text-ink">{mensajeExito}</h1>
-          <p className="mt-2 text-lg font-semibold text-ink">{nombreInscrito}</p>
-          <p className="mt-2 text-ink/60">Quedaste registrado en <strong>{eventoActual.nombre}</strong>. Nos vemos ahí.</p>
-          <p className="mt-6 text-xs text-ink/40">Te llevaremos al inicio en unos segundos…</p>
-          <button onClick={() => navigate('/')} className="mt-2 text-sm font-semibold text-ember hover:underline">
-            Ir al inicio ahora
-          </button>
+      <div className="flex min-h-[60vh] items-center justify-center bg-parchment px-5">
+        <div className="w-full max-w-md">
+          <TarjetaMarca className="text-center">
+            <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-[#007334]/10">
+              <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#007334" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M20 6 9 17l-5-5" />
+              </svg>
+            </div>
+            <h1 className="mt-4 font-display text-2xl font-bold text-ink">{mensajeExito}</h1>
+            <p className="mt-2 text-lg font-semibold text-ink">{nombreInscrito}</p>
+            <p className="mt-2 text-ink/60">Quedaste registrado en <strong>{eventoActual.nombre}</strong>. Nos vemos ahí.</p>
+            <p className="mt-6 text-xs text-ink/40">Te llevaremos al inicio en unos segundos…</p>
+            <button onClick={() => navigate('/')} className="mt-2 text-sm font-semibold text-ember hover:underline">
+              Ir al inicio ahora
+            </button>
+          </TarjetaMarca>
         </div>
       </div>
     );
@@ -288,25 +351,30 @@ export default function Registro() {
 
   if (participanteExistente && !editando) {
     return (
-      <div className="flex min-h-[60vh] items-center justify-center bg-parchment px-5 text-center">
-        <div className="w-full max-w-md rounded-2xl border border-ink/10 bg-white p-8 shadow-sm">
-          <p className="text-sm text-ink/50">Ya tenemos tus datos registrados</p>
-          <h1 className="mt-1 font-display text-2xl font-bold text-ink">{participanteExistente.nombre_completo}</h1>
-          <p className="mt-4 text-sm text-ink/60">
-            ¿Confirmamos tu inscripción a <strong>{eventoActual.nombre}</strong>?
-          </p>
-          {error && <p className="mt-4 rounded-lg bg-ember/10 p-3 text-sm text-ember">{error}</p>}
-          <div className="mt-6 flex flex-col gap-3">
-            <Boton onClick={confirmarInscripcionExistente} disabled={cargando} variant="green" className="w-full">
-              {cargando ? 'Confirmando…' : 'Confirmar inscripción'}
-            </Boton>
-            <Boton onClick={abrirEdicion} variant="blue" className="w-full">
-              Actualizar información
-            </Boton>
-            <Boton onClick={() => { setParticipanteExistente(null); setForm(vacio); }} variant="red" className="w-full">
-              Cancelar
-            </Boton>
-          </div>
+      <div className="flex min-h-[60vh] items-center justify-center bg-parchment px-5">
+        <div className="w-full max-w-md">
+          <TarjetaMarca className="text-center">
+            <p className="text-sm text-ink/50">Ya tenemos tus datos registrados</p>
+            <h1 className="mt-1 font-display text-2xl font-bold text-ink">{participanteExistente.nombre_completo}</h1>
+            <p className="mt-4 text-sm text-ink/60">
+              ¿Confirmamos tu inscripción a <strong>{eventoActual.nombre}</strong>?
+            </p>
+            {error && <p className="mt-4 rounded-lg bg-ember/10 p-3 text-sm text-ember">{error}</p>}
+            <div className="mt-6 flex flex-col gap-3">
+              <Boton onClick={confirmarInscripcionExistente} disabled={cargando} variant="green" className="w-full">
+                {cargando ? 'Confirmando…' : 'Confirmar inscripción'}
+              </Boton>
+              <BotonSecundario onClick={abrirEdicion} className="w-full">
+                Actualizar información
+              </BotonSecundario>
+              <button
+                onClick={() => { setParticipanteExistente(null); setForm(vacio); }}
+                className="text-sm font-semibold text-ink/50 transition hover:text-ember"
+              >
+                Cancelar e ingresar otro DNI
+              </button>
+            </div>
+          </TarjetaMarca>
         </div>
       </div>
     );
@@ -316,10 +384,8 @@ export default function Registro() {
     return (
       <div className="min-h-[70vh] bg-parchment px-5 py-14">
         <div className="mx-auto max-w-xl">
-          <p className="text-center text-xs font-semibold uppercase tracking-wide text-ember">
-            Actualiza tus datos · {eventoActual.nombre}
-          </p>
-          <div className="mt-8 rounded-2xl border border-ink/10 bg-white p-8 shadow-sm">
+          <Encabezado etiqueta={`Actualiza tus datos · ${eventoActual.nombre}`} />
+          <TarjetaMarca>
             {error && <p className="mb-4 rounded-lg bg-ember/10 p-3 text-sm text-ember">{error}</p>}
             <div className="space-y-4">
               <h2 className="font-display text-xl font-bold text-ink">Tus datos</h2>
@@ -387,13 +453,13 @@ export default function Registro() {
                 />
               </Campo>
               <div className="flex justify-between pt-2">
-                <Boton onClick={() => setEditando(false)} variant="red">Cancelar</Boton>
+                <BotonSecundario onClick={() => setEditando(false)}>Cancelar</BotonSecundario>
                 <Boton onClick={guardarEdicionYConfirmar} disabled={cargando} variant="green">
                   {cargando ? 'Guardando…' : 'Guardar y confirmar inscripción'}
                 </Boton>
               </div>
             </div>
-          </div>
+          </TarjetaMarca>
         </div>
       </div>
     );
@@ -404,16 +470,20 @@ export default function Registro() {
   return (
     <div className="min-h-[70vh] bg-parchment px-5 py-14">
       <div className="mx-auto max-w-xl">
-        <p className="text-center text-xs font-semibold uppercase tracking-wide text-ember">
-          Inscripción · {eventoActual.nombre}
-        </p>
-        <div className="mt-3 flex justify-center gap-1.5">
-          {Array.from({ length: TOTAL_PASOS }).map((_, i) => (
-            <span key={i} className={`h-1.5 w-8 rounded-full ${i + 1 <= paso ? 'bg-ember' : 'bg-ink/10'}`} />
-          ))}
+        <Encabezado etiqueta={`Inscripción · ${eventoActual.nombre}`} />
+
+        <div className="mb-2 flex items-center justify-between text-xs font-semibold text-ink/40">
+          <span>Paso {paso} de {TOTAL_PASOS}</span>
+          <span>{NOMBRES_PASOS[paso - 1]}</span>
+        </div>
+        <div className="h-1.5 w-full overflow-hidden rounded-full bg-ink/10">
+          <div
+            className="h-full rounded-full bg-ember transition-all duration-300"
+            style={{ width: `${(paso / TOTAL_PASOS) * 100}%` }}
+          />
         </div>
 
-        <div className="mt-8 rounded-2xl border border-ink/10 bg-white p-8 shadow-sm">
+        <TarjetaMarca className="mt-8">
           {error && <p className="mb-4 rounded-lg bg-ember/10 p-3 text-sm text-ember">{error}</p>}
 
           {paso === 1 && (
@@ -427,7 +497,7 @@ export default function Registro() {
                   onKeyDown={(e) => {
                     if (e.key === 'Enter' && form.dni.length === 13 && !cargando) verificarDni();
                   }}
-                  className="w-full rounded-lg border border-ink/15 px-3 py-3 text-center font-display text-2xl tracking-widest focus:border-ember focus:outline-none"
+                  className="w-full rounded-lg border border-ink/15 bg-white px-3 py-3 text-center font-display text-2xl tracking-widest text-ink transition focus:border-ember focus:outline-none focus:ring-4 focus:ring-ember/10"
                   placeholder="0801199012345"
                 />
                 <span className="mt-1 block text-center text-xs text-ink/40">
@@ -437,6 +507,9 @@ export default function Registro() {
               <div className="flex justify-center pt-2">
                 <Boton onClick={verificarDni} disabled={cargando}>{cargando ? 'Verificando…' : 'Continuar'}</Boton>
               </div>
+              <p className="rounded-lg bg-[#1F3464]/5 px-3 py-2 text-xs text-ink/50">
+                ¿Eres extranjero? Tu inscripción a este evento es de forma presencial.
+              </p>
             </div>
           )}
 
@@ -514,7 +587,7 @@ export default function Registro() {
                   {CARGOS_FIHNEC.map((c) => <option key={c}>{c}</option>)}
                 </select>
               </Campo>
-              <Campo etiqueta="¿Ha recibido SAELES anteriormente?">
+              <CampoGrupo etiqueta="¿Ha recibido SAELES anteriormente?">
                 <div className="flex gap-3">
                   <BotonSecundario
                     onClick={() => setForm((f) => ({ ...f, ha_recibido_saeles: true }))}
@@ -529,7 +602,7 @@ export default function Registro() {
                     No
                   </BotonSecundario>
                 </div>
-              </Campo>
+              </CampoGrupo>
               {form.ha_recibido_saeles === true && (
                 <Campo etiqueta="¿Cuántos, sin contar el de hoy?">
                   <input
@@ -602,7 +675,7 @@ export default function Registro() {
               </div>
             </div>
           )}
-        </div>
+        </TarjetaMarca>
       </div>
     </div>
   );

@@ -110,17 +110,46 @@ export default function AdminDiplomas() {
 
   return (
     <div>
-      <h1 className="font-display text-2xl font-bold text-ink">Diplomas</h1>
-      <p className="mt-1 text-sm text-ink/50">
-        Participantes con asistencia confirmada en el evento actual, listos para exportar y preparar diplomas.
-      </p>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h1 className="font-display text-2xl font-bold text-ink">Diplomas</h1>
+          <p className="mt-1 text-sm text-ink/50">
+            Participantes con asistencia confirmada en el evento actual, listos para exportar y preparar diplomas.
+          </p>
+        </div>
+        {eventoActual && (
+          <div className="flex shrink-0 gap-2 print:hidden">
+            <button
+              onClick={() => descargar('excel')}
+              disabled={!!descargando || !datos || datos.total === 0}
+              className="rounded-full bg-[#007334]/10 px-4 py-1.5 text-xs font-semibold text-[#007334] hover:bg-[#007334]/20 disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              {descargando === 'excel' ? 'Descargando…' : '↓ Excel'}
+            </button>
+            <button
+              onClick={() => descargar('pdf')}
+              disabled={!!descargando || !datos || datos.total === 0}
+              className="rounded-full bg-ember/10 px-4 py-1.5 text-xs font-semibold text-ember hover:bg-ember/20 disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              {descargando === 'pdf' ? 'Descargando…' : '↓ PDF'}
+            </button>
+            <button
+              onClick={imprimir}
+              disabled={!!descargando || !datos || datos.total === 0}
+              className="rounded-full border border-ink/20 px-4 py-1.5 text-xs font-semibold text-ink/70 hover:bg-ink/5 disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              {descargando === 'imprimir' ? 'Preparando…' : 'Imprimir'}
+            </button>
+          </div>
+        )}
+      </div>
 
       {error && <p className="mt-4 rounded-lg bg-ember/10 p-3 text-sm text-ember">{error}</p>}
 
       {/* INVENTARIO DE DIPLOMAS — standalone, no depende del evento actual */}
       <div className="mt-4 overflow-hidden rounded-2xl border border-ink/10 bg-white shadow-sm print:hidden">
-        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-ink/10 bg-ink/5 px-4 py-3">
-          <h2 className="font-display text-base font-bold text-ink">Inventario de Diplomas</h2>
+        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-ink/10 bg-[#007334]/10 px-4 py-3">
+          <h2 className="font-display text-base font-bold text-[#007334]">Inventario de Diplomas</h2>
           <button
             onClick={() => setModoEdicionInventario((m) => !m)}
             className={`rounded-full px-4 py-1.5 text-xs font-semibold transition ${
@@ -173,43 +202,19 @@ export default function AdminDiplomas() {
 
       {eventoActual && (
         <>
-          <div className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-ink/10 bg-night px-4 py-3 text-white shadow-sm print:hidden">
+          <div className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-ink/10 bg-[#007334]/10 px-4 py-3 shadow-sm print:hidden">
             <div>
-              <p className="text-xs uppercase tracking-wide text-white/60">Evento actual</p>
-              <p className="font-display text-lg font-bold">{eventoActual.nombre}</p>
+              <p className="text-xs font-semibold uppercase tracking-wide text-[#007334]">Evento actual</p>
+              <p className="font-display text-lg font-bold text-[#007334]">{eventoActual.nombre}</p>
             </div>
             {datos && (
-              <p className="text-sm">
+              <p className="text-sm text-[#007334]">
                 <span className="font-display text-2xl font-bold">{datos.total}</span>
-                <span className="text-white/60"> confirmados · </span>
+                <span className="font-semibold"> confirmados · </span>
                 <span className="font-display text-2xl font-bold">{datos.total_primera_vez}</span>
-                <span className="text-white/60"> primera vez</span>
+                <span className="font-semibold"> primera vez</span>
               </p>
             )}
-          </div>
-
-          <div className="mt-4 flex flex-wrap gap-2 print:hidden">
-            <button
-              onClick={() => descargar('excel')}
-              disabled={!!descargando || !datos || datos.total === 0}
-              className="rounded-full bg-[#007334] px-5 py-2 text-sm font-semibold text-white hover:bg-[#005c29] disabled:opacity-50"
-            >
-              {descargando === 'excel' ? 'Descargando…' : '↓ Descargar Excel'}
-            </button>
-            <button
-              onClick={() => descargar('pdf')}
-              disabled={!!descargando || !datos || datos.total === 0}
-              className="rounded-full bg-ember px-5 py-2 text-sm font-semibold text-white hover:bg-ember-light disabled:opacity-50"
-            >
-              {descargando === 'pdf' ? 'Descargando…' : '↓ Descargar PDF'}
-            </button>
-            <button
-              onClick={imprimir}
-              disabled={!!descargando || !datos || datos.total === 0}
-              className="rounded-full border border-ink/20 px-5 py-2 text-sm font-semibold text-ink/70 hover:bg-ink/5 disabled:opacity-50"
-            >
-              {descargando === 'imprimir' ? 'Preparando…' : 'Imprimir'}
-            </button>
           </div>
 
           {cargando ? (
@@ -218,7 +223,7 @@ export default function AdminDiplomas() {
             <div className="mt-4 overflow-x-auto rounded-2xl border border-ink/10 bg-white shadow-sm">
               <table className="w-full text-sm">
                 <thead>
-                  <tr className="border-b border-ink/10 text-left text-xs uppercase tracking-wide text-ink/40">
+                  <tr className="border-b border-ink/10 bg-[#007334]/10 text-left text-xs uppercase tracking-wide text-[#007334]">
                     <th className="px-4 py-3">#</th>
                     <th className="px-4 py-3">Zona</th>
                     <th className="px-4 py-3">Capítulo</th>

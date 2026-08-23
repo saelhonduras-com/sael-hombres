@@ -710,7 +710,7 @@ function TablaModulo({
       {expandido && (
         <table className="w-full text-sm">
           <thead>
-            <tr className="border-b border-ink/10 text-center text-xs uppercase tracking-wide text-ink/40">
+            <tr className="border-b border-ink/10 bg-[#0F7173]/12 text-center text-xs uppercase tracking-wide text-[#0F7173]">
               <th className="px-4 py-2">#Habitación</th>
               <th className="px-4 py-2">Capacidad</th>
               <th className="px-4 py-2">Asignado</th>

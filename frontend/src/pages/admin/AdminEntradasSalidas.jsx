@@ -38,6 +38,11 @@ export default function AdminEntradasSalidas() {
   const [guardandoHotelId, setGuardandoHotelId] = useState(null);
   const [modoEdicionHotel, setModoEdicionHotel] = useState(false);
 
+  // --- Precio por Comida (evento + Vigilia Saelistas) ---
+  const [preciosComida, setPreciosComida] = useState([]);
+  const [editandoPrecio, setEditandoPrecio] = useState({});
+  const [modoEdicionComida, setModoEdicionComida] = useState(false);
+
   useEffect(() => {
     api.get('/eventos')
       .then(({ data }) => {
@@ -52,16 +57,18 @@ export default function AdminEntradasSalidas() {
     setCargando(true);
     setError('');
     try {
-      const [rHotelCostos, rModulos, rBoleteriaConfig, rBoleteriaResumen] = await Promise.all([
+      const [rHotelCostos, rModulos, rBoleteriaConfig, rBoleteriaResumen, rPreciosComida] = await Promise.all([
         api.get(`/admin/eventos/${eventoActual.id}/costos`),
         api.get('/admin/modulos'),
         api.get('/admin/boleteria/config'),
         api.get('/admin/boleteria/resumen', { params: { evento_actual_id: eventoActual.id } }),
+        api.get(`/admin/eventos/${eventoActual.id}/precios-cuenta`),
       ]);
 
       const porModulo = {};
       rHotelCostos.data.filter((c) => c.modulo_id).forEach((c) => { porModulo[c.modulo_id] = c.monto; });
       setCostosModulo(porModulo);
+      setPreciosComida(rPreciosComida.data);
 
       setModulos(rModulos.data);
       setRangoFinImpreso(rBoleteriaConfig.data.rango_fin_impreso ?? '');
@@ -148,6 +155,33 @@ export default function AdminEntradasSalidas() {
     }
   }
 
+  const [guardandoGrupo, setGuardandoGrupo] = useState(null);
+
+  // --- Precio por Comida ---
+  async function guardarPreciosGrupo(grupo) {
+    const cuentasDelGrupo = preciosComida.filter((c) => c.tipo_calculo === grupo);
+    setGuardandoGrupo(grupo);
+    setError('');
+    try {
+      await Promise.all(
+        cuentasDelGrupo.map((c) => {
+          const precio = editandoPrecio[c.cuenta_id] ?? c.precio;
+          return api.put(`/admin/eventos/${eventoActual.id}/precios-cuenta/${c.cuenta_id}`, { precio: Number(precio) });
+        })
+      );
+      setEditandoPrecio((e) => {
+        const copia = { ...e };
+        cuentasDelGrupo.forEach((c) => delete copia[c.cuenta_id]);
+        return copia;
+      });
+      cargarTodo();
+    } catch (err) {
+      setError(mensajeError(err));
+    } finally {
+      setGuardandoGrupo(null);
+    }
+  }
+
   return (
     <div>
       <h1 className="font-display text-2xl font-bold text-ink">Entradas & Salidas</h1>
@@ -165,7 +199,7 @@ export default function AdminEntradasSalidas() {
       {eventoActual && cargando ? <p className="mt-6 text-ink/40">Cargando…</p> : eventoActual && (
         <div className="mt-4 space-y-6">
           {/* BOLETERÍA */}
-          <div className="rounded-2xl border border-ink/10 bg-white p-6 shadow-sm">
+          <div className="rounded-2xl border border-ink/10 border-l-4 border-l-[#FDC41F] bg-white p-6 shadow-sm">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <div>
                 <h2 className="font-display text-lg font-bold text-ink">Boletería</h2>
@@ -188,9 +222,9 @@ export default function AdminEntradasSalidas() {
 
             <div className="mt-4 grid gap-4 lg:grid-cols-2">
               <div className="overflow-hidden rounded-xl border border-ink/10">
-                <div className="border-b border-ink/10 bg-ink/5 px-4 py-2">
+                <div className="border-b border-ink/10 bg-[#FDC41F]/12 px-4 py-2">
                   <label className="flex items-center gap-2">
-                    <span className="text-xs font-semibold uppercase tracking-wide text-ink/50">Evento anterior —</span>
+                    <span className="text-xs font-semibold uppercase tracking-wide text-[#92660A]">Evento anterior —</span>
                     <input
                       type="text" value={eventoAnteriorNombre} onChange={(e) => setEventoAnteriorNombre(e.target.value)}
                       disabled={!modoEdicionBoleteria}
@@ -236,8 +270,8 @@ export default function AdminEntradasSalidas() {
               </div>
 
               <div className="overflow-hidden rounded-xl border border-ink/10">
-                <div className="border-b border-ink/10 bg-ink/5 px-4 py-2">
-                  <p className="text-xs font-semibold uppercase tracking-wide text-ink/50">
+                <div className="border-b border-ink/10 bg-[#FDC41F]/12 px-4 py-2">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-[#92660A]">
                     Boletos disponibles — <span className="font-bold text-ink">{eventoActual.nombre}</span>
                   </p>
                 </div>
@@ -284,6 +318,7 @@ export default function AdminEntradasSalidas() {
             eventoId={eventoActual.id}
             onError={setError}
             puedeEditar={puedeEditar}
+            colorBorde="#007334"
           />
 
           {/* SALIDAS DE EFECTIVO — cuentas de egreso del Catálogo */}
@@ -294,13 +329,76 @@ export default function AdminEntradasSalidas() {
             eventoId={eventoActual.id}
             onError={setError}
             puedeEditar={puedeEditar}
+            colorBorde="#E40521"
           />
 
-          {/* HOTEL POR MÓDULO */}
-          <div className="rounded-2xl border border-ink/10 bg-white p-6 shadow-sm">
+          {/* PRECIO POR COMIDA — cantidad calculada sola (participantes +
+              Saelistas para el evento, o solo Saelistas para Vigilia),
+              solo el precio unitario se escribe a mano. */}
+          <div className="rounded-2xl border border-ink/10 border-l-4 border-l-[#1F3464] bg-white p-6 shadow-sm">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <div>
-                <h2 className="font-display text-lg font-bold text-ink">Hotel (costo por módulo)</h2>
+                <h2 className="font-display text-lg font-bold text-ink">Precio por Comida</h2>
+                <p className="mt-1 text-xs text-ink/50">
+                  La cantidad se calcula sola (participantes Registrados + Saelistas con asistencia, o solo Saelistas
+                  en Vigilia) — aquí solo se define el precio de cada comida.
+                </p>
+              </div>
+              <button
+                onClick={() => puedeEditar && setModoEdicionComida((m) => !m)}
+                disabled={!puedeEditar}
+                className={`shrink-0 rounded-full px-4 py-2 text-sm font-semibold transition ${
+                  !puedeEditar
+                    ? 'cursor-not-allowed bg-ink/5 text-ink/30'
+                    : modoEdicionComida ? 'bg-[#007334] text-white hover:bg-[#005c29]' : 'border border-ink/20 text-ink/70 hover:bg-ink/5'
+                }`}
+              >
+                {!puedeEditar ? '🔒 Solo consulta' : modoEdicionComida ? '🔓 Edición activada' : '🔒 Activar edición'}
+              </button>
+            </div>
+
+            {['comida_evento', 'comida_vigilia'].map((grupo) => (
+              <div key={grupo} className="mt-4">
+                <div className="mb-2 flex items-center justify-between">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-ink/40">
+                    {grupo === 'comida_evento' ? 'Comidas del evento (participantes + Saelistas)' : 'Comidas de Vigilia Saelistas'}
+                  </p>
+                  <button
+                    onClick={() => guardarPreciosGrupo(grupo)}
+                    disabled={guardandoGrupo === grupo || !modoEdicionComida}
+                    className={`${btnGuardar} disabled:cursor-not-allowed`}
+                  >
+                    {guardandoGrupo === grupo ? 'Guardando…' : 'Guardar precios'}
+                  </button>
+                </div>
+                <div className="space-y-2">
+                  {preciosComida.filter((c) => c.tipo_calculo === grupo).map((c) => (
+                    <div key={c.cuenta_id} className="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-ink/5 px-3 py-2">
+                      <span className="text-sm font-medium text-ink">{c.nombre}</span>
+                      <div className="flex items-center gap-3">
+                        <span className="text-xs text-ink/50">{c.cantidad} personas × </span>
+                        <span className="text-sm text-ink/60">L.</span>
+                        <input
+                          type="number" min="0" step="0.01"
+                          value={editandoPrecio[c.cuenta_id] ?? c.precio ?? ''}
+                          onChange={(e) => setEditandoPrecio((ed) => ({ ...ed, [c.cuenta_id]: e.target.value }))}
+                          disabled={!modoEdicionComida}
+                          className="w-24 rounded-lg border border-ink/15 px-2 py-1 text-sm disabled:border-transparent disabled:bg-transparent"
+                        />
+                        <span className="w-24 text-right text-sm font-semibold text-ink">L. {c.monto.toFixed(2)}</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+
+          {/* INGRESO POR PERSONA DE HABITACIONES (antes "Hotel por módulo") */}
+          <div className="rounded-2xl border border-ink/10 border-l-4 border-l-[#0F7173] bg-white p-6 shadow-sm">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div>
+                <h2 className="font-display text-lg font-bold text-ink">Aquí se controla el ingreso por persona de las habitaciones</h2>
                 <p className="mt-1 text-xs text-ink/50">
                   El precio real que se cobra por cada módulo de habitaciones. El precio que ves en Módulos es solo de
                   referencia — este es el que de verdad se usa en el módulo de cobro.
@@ -351,16 +449,17 @@ export default function AdminEntradasSalidas() {
 // Sección reutilizable: lista PLANA de cuentas del Catálogo (de un solo
 // tipo, ingreso o egreso), cada una con su valor configurado para este
 // evento — reemplaza el viejo "Costos del evento" de texto libre.
-function SeccionValoresCuenta({ titulo, subtitulo, tipo, eventoId, onError, puedeEditar }) {
+function SeccionValoresCuenta({ titulo, subtitulo, tipo, eventoId, onError, puedeEditar, colorBorde }) {
   const [cuentasConValor, setCuentasConValor] = useState([]);
   const [cuentasSinValor, setCuentasSinValor] = useState([]);
   const [cargando, setCargando] = useState(true);
-  const [editandoMontos, setEditandoMontos] = useState({});
+  const [editandoCampos, setEditandoCampos] = useState({});
   const [guardandoId, setGuardandoId] = useState(null);
   const [modoEdicion, setModoEdicion] = useState(false);
 
   const [cuentaSeleccionada, setCuentaSeleccionada] = useState('');
-  const [montoNuevo, setMontoNuevo] = useState('');
+  const [cantidadNueva, setCantidadNueva] = useState('1');
+  const [valorNuevo, setValorNuevo] = useState('');
   const [guardandoNuevo, setGuardandoNuevo] = useState(false);
 
   const [confirmacion, setConfirmacion] = useState(null);
@@ -391,17 +490,18 @@ function SeccionValoresCuenta({ titulo, subtitulo, tipo, eventoId, onError, pued
 
   useEffect(() => { cargar(); }, [eventoId, tipo]);
 
-  async function guardarMonto(cuenta) {
-    const monto = editandoMontos[cuenta.cuenta_id] ?? cuenta.monto;
-    if (monto === '' || monto === null || monto === undefined) {
-      onError('Escribe un monto.');
+  async function guardarValores(cuenta) {
+    const cantidad = editandoCampos[cuenta.cuenta_id]?.cantidad ?? cuenta.cantidad ?? 1;
+    const valor = editandoCampos[cuenta.cuenta_id]?.valor ?? cuenta.valor;
+    if (cantidad === '' || cantidad === null || valor === '' || valor === null || valor === undefined) {
+      onError('Escribe la cantidad y el valor.');
       return;
     }
     setGuardandoId(cuenta.cuenta_id);
     onError('');
     try {
-      await api.put(`/admin/eventos/${eventoId}/valores-cuenta/${cuenta.cuenta_id}`, { monto: Number(monto) });
-      setEditandoMontos((e) => { const c = { ...e }; delete c[cuenta.cuenta_id]; return c; });
+      await api.put(`/admin/eventos/${eventoId}/valores-cuenta/${cuenta.cuenta_id}`, { cantidad: Number(cantidad), valor: Number(valor) });
+      setEditandoCampos((e) => { const c = { ...e }; delete c[cuenta.cuenta_id]; return c; });
       cargar();
     } catch (err) {
       onError(mensajeError(err));
@@ -427,16 +527,17 @@ function SeccionValoresCuenta({ titulo, subtitulo, tipo, eventoId, onError, pued
   }
 
   async function agregarValor() {
-    if (!cuentaSeleccionada || montoNuevo === '') {
-      onError('Selecciona una cuenta y escribe un monto.');
+    if (!cuentaSeleccionada || cantidadNueva === '' || valorNuevo === '') {
+      onError('Selecciona una cuenta y escribe la cantidad y el valor.');
       return;
     }
     setGuardandoNuevo(true);
     onError('');
     try {
-      await api.put(`/admin/eventos/${eventoId}/valores-cuenta/${cuentaSeleccionada}`, { monto: Number(montoNuevo) });
+      await api.put(`/admin/eventos/${eventoId}/valores-cuenta/${cuentaSeleccionada}`, { cantidad: Number(cantidadNueva), valor: Number(valorNuevo) });
       setCuentaSeleccionada('');
-      setMontoNuevo('');
+      setCantidadNueva('1');
+      setValorNuevo('');
       cargar();
     } catch (err) {
       onError(mensajeError(err));
@@ -446,7 +547,7 @@ function SeccionValoresCuenta({ titulo, subtitulo, tipo, eventoId, onError, pued
   }
 
   return (
-    <div className="rounded-2xl border border-ink/10 bg-white p-6 shadow-sm">
+    <div className="rounded-2xl border border-ink/10 border-l-4 bg-white p-6 shadow-sm" style={{ borderLeftColor: colorBorde }}>
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div>
           <h2 className="font-display text-lg font-bold text-ink">{titulo}</h2>
@@ -468,25 +569,41 @@ function SeccionValoresCuenta({ titulo, subtitulo, tipo, eventoId, onError, pued
       {cargando ? <p className="mt-4 text-sm text-ink/40">Cargando…</p> : (
         <div className="mt-4 space-y-2">
           {cuentasConValor.length === 0 && <p className="text-sm text-ink/40">Sin valores asignados todavía — selecciona una cuenta abajo.</p>}
-          {cuentasConValor.map((c) => (
-            <div key={c.cuenta_id} className="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-ink/5 px-3 py-2">
-              <span className="text-sm font-medium text-ink">{c.nombre}</span>
-              <div className="flex flex-wrap items-center gap-2">
-                <span className="text-sm text-ink/60">L.</span>
-                <input
-                  type="number" min="0" step="0.01"
-                  value={editandoMontos[c.cuenta_id] ?? c.monto}
-                  onChange={(e) => setEditandoMontos((ed) => ({ ...ed, [c.cuenta_id]: e.target.value }))}
-                  disabled={!modoEdicion}
-                  className="w-28 rounded-lg border border-ink/15 px-2 py-1 text-sm disabled:bg-ink/5 disabled:text-ink/40"
-                />
-                <button onClick={() => guardarMonto(c)} disabled={guardandoId === c.cuenta_id || !modoEdicion} className={`${btnGuardar} disabled:cursor-not-allowed`}>
-                  {guardandoId === c.cuenta_id ? 'Guardando…' : 'Guardar'}
-                </button>
-                <button onClick={() => quitarValor(c)} disabled={!modoEdicion} className={`${btnEliminar} disabled:cursor-not-allowed disabled:opacity-40`}>Quitar</button>
+          {cuentasConValor.map((c) => {
+            const cantidadActual = editandoCampos[c.cuenta_id]?.cantidad ?? c.cantidad ?? 1;
+            const valorActual = editandoCampos[c.cuenta_id]?.valor ?? c.valor ?? 0;
+            const montoCalculado = (Number(cantidadActual) || 0) * (Number(valorActual) || 0);
+            return (
+              <div key={c.cuenta_id} className="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-ink/5 px-3 py-2">
+                <span className="text-sm font-medium text-ink">{c.nombre}</span>
+                <div className="flex flex-wrap items-center gap-2">
+                  <input
+                    type="number" min="0" step="1"
+                    value={cantidadActual}
+                    onChange={(e) => setEditandoCampos((ed) => ({ ...ed, [c.cuenta_id]: { cantidad: e.target.value, valor: valorActual } }))}
+                    disabled={!modoEdicion}
+                    className="w-16 rounded-lg border border-ink/15 px-2 py-1 text-sm text-center disabled:bg-ink/5 disabled:text-ink/40"
+                    title="Cantidad"
+                  />
+                  <span className="text-xs text-ink/40">×</span>
+                  <span className="text-sm text-ink/60">L.</span>
+                  <input
+                    type="number" min="0" step="0.01"
+                    value={valorActual}
+                    onChange={(e) => setEditandoCampos((ed) => ({ ...ed, [c.cuenta_id]: { cantidad: cantidadActual, valor: e.target.value } }))}
+                    disabled={!modoEdicion}
+                    className="w-28 rounded-lg border border-ink/15 px-2 py-1 text-sm disabled:bg-ink/5 disabled:text-ink/40"
+                    title="Valor unitario"
+                  />
+                  <button onClick={() => guardarValores(c)} disabled={guardandoId === c.cuenta_id || !modoEdicion} className={`${btnGuardar} disabled:cursor-not-allowed`}>
+                    {guardandoId === c.cuenta_id ? 'Guardando…' : 'Guardar'}
+                  </button>
+                  <button onClick={() => quitarValor(c)} disabled={!modoEdicion} className={`${btnEliminar} disabled:cursor-not-allowed disabled:opacity-40`}>Quitar</button>
+                  <span className="w-24 text-right text-sm font-semibold text-ink">L. {montoCalculado.toFixed(2)}</span>
+                </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
 
@@ -510,9 +627,17 @@ function SeccionValoresCuenta({ titulo, subtitulo, tipo, eventoId, onError, pued
           )}
         </label>
         <label>
-          <span className="mb-1 block text-xs font-semibold text-ink/60">Monto (L.)</span>
+          <span className="mb-1 block text-xs font-semibold text-ink/60">Cantidad</span>
           <input
-            type="number" min="0" step="0.01" value={montoNuevo} onChange={(e) => setMontoNuevo(e.target.value)}
+            type="number" min="0" step="1" value={cantidadNueva} onChange={(e) => setCantidadNueva(e.target.value)}
+            disabled={!modoEdicion}
+            className={`${claseInput} w-20 disabled:bg-ink/5 disabled:text-ink/40`}
+          />
+        </label>
+        <label>
+          <span className="mb-1 block text-xs font-semibold text-ink/60">Valor unitario (L.)</span>
+          <input
+            type="number" min="0" step="0.01" value={valorNuevo} onChange={(e) => setValorNuevo(e.target.value)}
             disabled={!modoEdicion}
             className={`${claseInput} w-32 disabled:bg-ink/5 disabled:text-ink/40`}
           />

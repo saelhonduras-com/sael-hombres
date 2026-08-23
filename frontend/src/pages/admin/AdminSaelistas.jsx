@@ -315,9 +315,25 @@ export default function AdminSaelistas() {
       <div className="flex flex-wrap items-center justify-between gap-2">
         <h1 className="font-display text-2xl font-bold text-ink">Saelistas</h1>
         {vista === 'lista' && (
-          <button onClick={abrirNuevo} className="rounded-full bg-ember px-5 py-2 text-sm font-semibold text-white hover:bg-ember-light">
-            + Nuevo Saelista
-          </button>
+          <div className="flex flex-wrap gap-2">
+            <button
+              onClick={() => descargar('excel')}
+              disabled={!!descargando || lista.length === 0}
+              className="rounded-full bg-[#007334]/10 px-4 py-1.5 text-xs font-semibold text-[#007334] hover:bg-[#007334]/20 disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              {descargando === 'excel' ? 'Descargando…' : '↓ Excel'}
+            </button>
+            <button
+              onClick={() => descargar('pdf')}
+              disabled={!!descargando || lista.length === 0}
+              className="rounded-full bg-ember/10 px-4 py-1.5 text-xs font-semibold text-ember hover:bg-ember/20 disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              {descargando === 'pdf' ? 'Descargando…' : '↓ PDF'}
+            </button>
+            <button onClick={abrirNuevo} className="rounded-full bg-ember px-5 py-2 text-sm font-semibold text-white hover:bg-ember-light">
+              + Nuevo Saelista
+            </button>
+          </div>
         )}
       </div>
       <p className="mt-1 text-sm text-ink/50">Servidores voluntarios de SAEL Hombres. Administrado solo desde el panel — sin login propio.</p>
@@ -346,14 +362,14 @@ export default function AdminSaelistas() {
           {!eventoActual && <p className="text-sm text-ink/40">No hay un evento SAEL marcado como actual/abierto en este momento.</p>}
           {eventoActual && (
             <>
-              <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-ink/10 bg-night px-4 py-3 text-white shadow-sm">
+              <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-ink/10 bg-[#1F3464]/10 px-4 py-3 shadow-sm">
                 <div>
-                  <p className="text-xs uppercase tracking-wide text-white/60">Evento actual</p>
-                  <p className="font-display text-lg font-bold">{eventoActual.nombre}</p>
+                  <p className="text-xs font-semibold uppercase tracking-wide text-[#1F3464]">Evento actual</p>
+                  <p className="font-display text-lg font-bold text-[#1F3464]">{eventoActual.nombre}</p>
                 </div>
-                <p className="text-sm">
+                <p className="text-sm text-[#1F3464]">
                   <span className="font-display text-2xl font-bold">{totalesAsistencia.total_registrados}</span>
-                  <span className="text-white/60"> / {totalesAsistencia.total} asistieron</span>
+                  <span className="font-semibold"> / {totalesAsistencia.total} asistieron</span>
                 </p>
               </div>
 
@@ -379,7 +395,7 @@ export default function AdminSaelistas() {
                 <div className="mt-4 overflow-hidden rounded-2xl border border-ink/10 bg-white shadow-sm">
                   <table className="w-full text-sm">
                     <thead>
-                      <tr className="border-b border-ink/10 text-left text-xs uppercase tracking-wide text-ink/40">
+                      <tr className="border-b border-ink/10 bg-[#1F3464]/10 text-left text-xs uppercase tracking-wide text-[#1F3464]">
                         <th className="px-4 py-3">Nombre</th>
                         <th className="px-4 py-3">Capítulo</th>
                         <th className="px-4 py-3">Zona</th>
@@ -414,23 +430,6 @@ export default function AdminSaelistas() {
 
       {vista === 'lista' && (
         <div className="mt-4">
-          <div className="flex flex-wrap gap-2">
-            <button
-              onClick={() => descargar('excel')}
-              disabled={!!descargando || lista.length === 0}
-              className="rounded-full bg-[#007334] px-5 py-2 text-sm font-semibold text-white hover:bg-[#005c29] disabled:opacity-50"
-            >
-              {descargando === 'excel' ? 'Descargando…' : '↓ Descargar Excel'}
-            </button>
-            <button
-              onClick={() => descargar('pdf')}
-              disabled={!!descargando || lista.length === 0}
-              className="rounded-full bg-ember px-5 py-2 text-sm font-semibold text-white hover:bg-ember-light disabled:opacity-50"
-            >
-              {descargando === 'pdf' ? 'Descargando…' : '↓ Descargar PDF'}
-            </button>
-          </div>
-
           <form onSubmit={buscarSubmit} className="mt-3 flex flex-wrap items-center gap-2 rounded-2xl border border-ink/10 bg-white p-3 shadow-sm">
             <input
               type="text" value={buscar} onChange={(e) => setBuscar(e.target.value)}
@@ -453,7 +452,7 @@ export default function AdminSaelistas() {
             <div className="mt-4 overflow-x-auto rounded-2xl border border-ink/10 bg-white shadow-sm">
               <table className="w-full text-sm">
                 <thead>
-                  <tr className="border-b border-ink/10 text-left text-xs uppercase tracking-wide text-ink/40">
+                  <tr className="border-b border-ink/10 bg-[#1F3464]/10 text-left text-xs uppercase tracking-wide text-[#1F3464]">
                     <th className="px-4 py-3">Nombre</th>
                     <th className="px-4 py-3">DNI</th>
                     <th className="px-4 py-3">Capítulo</th>
