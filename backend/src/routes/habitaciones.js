@@ -83,7 +83,7 @@ router.get('/admin/habitaciones', requireAuth, requireModulo('habitaciones', 'co
               m.nombre AS modulo_nombre, m.precio_por_persona AS modulo_precio,
               COALESCE(o.total_ocupantes, 0) AS ocupantes,
               COALESCE(o.ocupantes_json, '[]'::json) AS ocupantes_detalle,
-              r.nombre_reservado, r.numero_transferencia, r.monto AS reserva_monto
+              r.nombre_reservado, r.numero_transferencia, r.monto AS reserva_monto, r.es_reserva_seguridad
        FROM habitaciones h
        LEFT JOIN modulos m ON m.id = h.modulo_id
        LEFT JOIN (
@@ -240,6 +240,25 @@ router.post('/admin/habitaciones/:id/ocupantes', requireAuth, requireModulo('hab
     if (habitacion.rows.length === 0) {
       return res.status(404).json({ error: 'La habitación no existe.' });
     }
+
+    // Nadie puede quedar asignado a dos habitaciones a la vez en el mismo
+    // evento — sin importar si es la misma habitación o una distinta.
+    const columnaPersona = tipo_ocupante === 'participante' ? 'participante_id' : 'saelista_id';
+    const idPersona = tipo_ocupante === 'participante' ? participante_id : saelista_id;
+    const yaAsignado = await pool.query(
+      `SELECT h.numero
+       FROM habitacion_ocupantes ho
+       JOIN habitaciones h ON h.id = ho.habitacion_id
+       WHERE ho.evento_id = $1 AND ho.${columnaPersona} = $2
+       LIMIT 1`,
+      [evento_id, idPersona]
+    );
+    if (yaAsignado.rows.length > 0) {
+      return res.status(400).json({
+        error: `Esta persona ya está asignada a la Habitación ${yaAsignado.rows[0].numero} en este evento. Quítala de ahí primero si necesitas moverla.`,
+      });
+    }
+
     const actuales = await pool.query(
       `SELECT COUNT(*) FROM habitacion_ocupantes WHERE habitacion_id = $1 AND evento_id = $2`,
       [id, evento_id]
@@ -318,8 +337,14 @@ router.delete('/admin/habitacion-ocupantes/:ocupanteId', requireAuth, requireMod
 // persona llegue.
 router.post('/admin/habitaciones/:id/reservar', requireAuth, requireModulo('habitaciones', 'edicion'), async (req, res) => {
   const { id } = req.params;
-  const { evento_id, nombre_reservado, numero_transferencia } = req.body;
-  if (!evento_id || !nombre_reservado || !numero_transferencia) {
+  const { evento_id, nombre_reservado, numero_transferencia, es_reserva_seguridad } = req.body;
+  // Reserva de seguridad: solo apartar el cupo, sin depósito real todavía —
+  // no pide número de transferencia, y no debe sumar a Control de Ingresos.
+  if (es_reserva_seguridad) {
+    if (!evento_id || !nombre_reservado) {
+      return res.status(400).json({ error: 'Faltan datos: evento y nombre son obligatorios.' });
+    }
+  } else if (!evento_id || !nombre_reservado || !numero_transferencia) {
     return res.status(400).json({ error: 'Faltan datos: evento, nombre, y número de transferencia son obligatorios.' });
   }
   try {
@@ -331,23 +356,33 @@ router.post('/admin/habitaciones/:id/reservar', requireAuth, requireModulo('habi
     if (!moduloId) {
       return res.status(400).json({ error: 'Esta habitación no tiene un módulo asignado — asígnale uno primero en Habitaciones.' });
     }
-    const precio = await pool.query(
-      `SELECT monto FROM eventos_costos WHERE evento_id = $1 AND modulo_id = $2 AND concepto = 'Hotel'`,
-      [evento_id, moduloId]
-    );
-    if (precio.rows.length === 0) {
-      return res.status(400).json({ error: 'Este módulo todavía no tiene un precio de Hotel configurado — configúralo primero en Entradas de Efectivo.' });
+
+    // Una reserva de seguridad no tiene depósito real todavía, así que su
+    // monto queda en NULL a propósito — eso es lo que hace que Control de
+    // Ingresos & Egresos no la cuente (la consulta de Hotel ya filtra por
+    // "monto IS NOT NULL"). En cuanto se le asigne alguien de verdad, esa
+    // fila se reemplaza por una asignación real con su propio monto.
+    let monto = null;
+    if (!es_reserva_seguridad) {
+      const precio = await pool.query(
+        `SELECT monto FROM eventos_costos WHERE evento_id = $1 AND modulo_id = $2 AND concepto = 'Hotel'`,
+        [evento_id, moduloId]
+      );
+      if (precio.rows.length === 0) {
+        return res.status(400).json({ error: 'Este módulo todavía no tiene un precio de Hotel configurado — configúralo primero en Entradas de Efectivo.' });
+      }
+      monto = precio.rows[0].monto;
     }
-    const monto = precio.rows[0].monto;
 
     await pool.query(
-      `INSERT INTO habitacion_reservas (habitacion_id, evento_id, nombre_reservado, numero_transferencia, monto)
-       VALUES ($1, $2, $3, $4, $5)
+      `INSERT INTO habitacion_reservas (habitacion_id, evento_id, nombre_reservado, numero_transferencia, monto, es_reserva_seguridad)
+       VALUES ($1, $2, $3, $4, $5, $6)
        ON CONFLICT (habitacion_id, evento_id) DO UPDATE SET
          nombre_reservado = EXCLUDED.nombre_reservado,
          numero_transferencia = EXCLUDED.numero_transferencia,
-         monto = EXCLUDED.monto`,
-      [id, evento_id, nombre_reservado, numero_transferencia, monto]
+         monto = EXCLUDED.monto,
+         es_reserva_seguridad = EXCLUDED.es_reserva_seguridad`,
+      [id, evento_id, nombre_reservado, numero_transferencia || null, monto, !!es_reserva_seguridad]
     );
     res.status(201).json({ ok: true, monto });
   } catch (err) {

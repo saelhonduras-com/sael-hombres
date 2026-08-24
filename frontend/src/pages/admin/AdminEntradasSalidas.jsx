@@ -3,8 +3,8 @@ import { useOutletContext } from 'react-router-dom';
 import api, { mensajeError } from '../../api';
 
 const claseInput = 'w-full rounded-lg border border-ink/15 px-3 py-2 text-sm focus:border-ember focus:outline-none';
-const btnGuardar = 'rounded-full bg-[#007334] px-4 py-1.5 text-xs font-semibold text-white hover:bg-[#005c29] disabled:opacity-50';
-const btnEliminar = 'rounded-full bg-ember px-3 py-1 text-xs font-semibold text-white hover:bg-ember-light';
+const btnGuardar = 'rounded-full bg-[#007334]/10 px-4 py-1.5 text-xs font-semibold text-[#007334] hover:bg-[#007334]/20 disabled:opacity-50';
+const btnEliminar = 'rounded-full bg-ember/10 px-3 py-1 text-xs font-semibold text-ember hover:bg-ember/20';
 
 export default function AdminEntradasSalidas() {
   const { rol, permisosPorModulo } = useOutletContext();
@@ -34,6 +34,7 @@ export default function AdminEntradasSalidas() {
   // --- Hotel por módulo ---
   const [modulos, setModulos] = useState([]);
   const [costosModulo, setCostosModulo] = useState({});
+  const [cuentasHotel, setCuentasHotel] = useState([]); // cuentas hijas de "Hotel" (4.2.x), para asociar por módulo
   const [editandoHotel, setEditandoHotel] = useState({});
   const [guardandoHotelId, setGuardandoHotelId] = useState(null);
   const [modoEdicionHotel, setModoEdicionHotel] = useState(false);
@@ -66,8 +67,17 @@ export default function AdminEntradasSalidas() {
       ]);
 
       const porModulo = {};
-      rHotelCostos.data.filter((c) => c.modulo_id).forEach((c) => { porModulo[c.modulo_id] = c.monto; });
+      rHotelCostos.data.filter((c) => c.modulo_id).forEach((c) => {
+        porModulo[c.modulo_id] = { monto: c.monto, cuenta_efectivo_id: c.cuenta_efectivo_id, cuenta_bancos_id: c.cuenta_bancos_id };
+      });
       setCostosModulo(porModulo);
+
+      // Cuentas hijas de "Hotel" (4.2.x) — las que se pueden asociar a
+      // cada módulo para Efectivo/Bancos. Se reutiliza el mismo endpoint
+      // que ya usa "Entradas de Efectivo", filtrando por código.
+      const rCuentasHotel = await api.get(`/admin/eventos/${eventoActual.id}/valores-cuenta`, { params: { tipo: 'ingreso' } });
+      setCuentasHotel(rCuentasHotel.data.filter((c) => c.codigo?.startsWith('4.2.')));
+
       setPreciosComida(rPreciosComida.data);
 
       setModulos(rModulos.data);
@@ -139,13 +149,25 @@ export default function AdminEntradasSalidas() {
   }
 
   // --- Hotel por módulo ---
+  function campoHotel(moduloId, campo) {
+    if (editandoHotel[moduloId] && campo in editandoHotel[moduloId]) return editandoHotel[moduloId][campo];
+    return costosModulo[moduloId]?.[campo] ?? '';
+  }
+  function cambiarCampoHotel(moduloId, campo, valor) {
+    setEditandoHotel((e) => ({ ...e, [moduloId]: { ...e[moduloId], [campo]: valor } }));
+  }
+
   async function guardarCostoModulo(modulo) {
-    const monto = editandoHotel[modulo.id];
+    const monto = campoHotel(modulo.id, 'monto');
     if (monto === undefined || monto === '') return;
     setGuardandoHotelId(modulo.id);
     setError('');
     try {
-      await api.put(`/admin/eventos/${eventoActual.id}/costos-modulo/${modulo.id}`, { monto: Number(monto) });
+      await api.put(`/admin/eventos/${eventoActual.id}/costos-modulo/${modulo.id}`, {
+        monto: Number(monto),
+        cuenta_efectivo_id: campoHotel(modulo.id, 'cuenta_efectivo_id') || null,
+        cuenta_bancos_id: campoHotel(modulo.id, 'cuenta_bancos_id') || null,
+      });
       setEditandoHotel((e) => { const copia = { ...e }; delete copia[modulo.id]; return copia; });
       cargarTodo();
     } catch (err) {
@@ -417,24 +439,61 @@ export default function AdminEntradasSalidas() {
               </button>
             </div>
 
-            <div className="mt-4 space-y-2">
+            <div className="mt-4 space-y-3">
               {modulos.length === 0 && <p className="text-sm text-ink/40">No hay módulos creados todavía — créalos primero en Habitaciones.</p>}
+              {cuentasHotel.length === 0 && modulos.length > 0 && (
+                <p className="text-xs text-ember">
+                  No hay ninguna cuenta hija de "Hotel" (4.2.x) en el Catálogo todavía — agrégalas ahí primero para poder asociarlas aquí.
+                </p>
+              )}
               {modulos.map((m) => (
-                <div key={m.id} className="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-ink/5 px-3 py-2">
-                  <span className="text-sm font-medium text-ink">{m.nombre}</span>
-                  <div className="flex items-center gap-2">
-                    <span className="text-sm text-ink/60">L.</span>
-                    <input
-                      type="number" min="0" step="0.01"
-                      value={editandoHotel[m.id] ?? costosModulo[m.id] ?? ''}
-                      onChange={(e) => setEditandoHotel((ed) => ({ ...ed, [m.id]: e.target.value }))}
-                      disabled={!modoEdicionHotel}
-                      className="w-28 rounded-lg border border-ink/15 px-2 py-1 text-sm disabled:border-transparent disabled:bg-transparent"
-                      placeholder="Sin definir"
-                    />
-                    <button onClick={() => guardarCostoModulo(m)} disabled={guardandoHotelId === m.id || !modoEdicionHotel} className={btnGuardar}>
-                      {guardandoHotelId === m.id ? 'Guardando…' : 'Guardar'}
-                    </button>
+                <div key={m.id} className="rounded-lg bg-ink/5 px-3 py-2">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <span className="text-sm font-medium text-ink">{m.nombre}</span>
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm text-ink/60">L.</span>
+                      <input
+                        type="number" min="0" step="0.01"
+                        value={campoHotel(m.id, 'monto')}
+                        onChange={(e) => cambiarCampoHotel(m.id, 'monto', e.target.value)}
+                        disabled={!modoEdicionHotel}
+                        className="w-28 rounded-lg border border-ink/15 px-2 py-1 text-sm disabled:border-transparent disabled:bg-transparent"
+                        placeholder="Sin definir"
+                      />
+                      <button onClick={() => guardarCostoModulo(m)} disabled={guardandoHotelId === m.id || !modoEdicionHotel} className={btnGuardar}>
+                        {guardandoHotelId === m.id ? 'Guardando…' : 'Guardar'}
+                      </button>
+                    </div>
+                  </div>
+                  <div className="mt-2 grid gap-2 sm:grid-cols-2">
+                    <label className="block">
+                      <span className="mb-0.5 block text-[11px] text-ink/40">Cuenta para Efectivo</span>
+                      <select
+                        value={campoHotel(m.id, 'cuenta_efectivo_id')}
+                        onChange={(e) => cambiarCampoHotel(m.id, 'cuenta_efectivo_id', e.target.value)}
+                        disabled={!modoEdicionHotel}
+                        className="w-full rounded-lg border border-ink/15 px-2 py-1 text-xs disabled:border-transparent disabled:bg-transparent"
+                      >
+                        <option value="">Sin asociar</option>
+                        {cuentasHotel.map((c) => (
+                          <option key={c.cuenta_id} value={c.cuenta_id}>{c.codigo} — {c.nombre}</option>
+                        ))}
+                      </select>
+                    </label>
+                    <label className="block">
+                      <span className="mb-0.5 block text-[11px] text-ink/40">Cuenta para Bancos (Transferencia)</span>
+                      <select
+                        value={campoHotel(m.id, 'cuenta_bancos_id')}
+                        onChange={(e) => cambiarCampoHotel(m.id, 'cuenta_bancos_id', e.target.value)}
+                        disabled={!modoEdicionHotel}
+                        className="w-full rounded-lg border border-ink/15 px-2 py-1 text-xs disabled:border-transparent disabled:bg-transparent"
+                      >
+                        <option value="">Sin asociar</option>
+                        {cuentasHotel.map((c) => (
+                          <option key={c.cuenta_id} value={c.cuenta_id}>{c.codigo} — {c.nombre}</option>
+                        ))}
+                      </select>
+                    </label>
                   </div>
                 </div>
               ))}
@@ -644,7 +703,7 @@ function SeccionValoresCuenta({ titulo, subtitulo, tipo, eventoId, onError, pued
         </label>
         <button
           onClick={agregarValor} disabled={guardandoNuevo || !cuentaSeleccionada || !modoEdicion}
-          className="rounded-full bg-ember px-5 py-2 text-sm font-semibold text-white hover:bg-ember-light disabled:cursor-not-allowed disabled:opacity-50"
+          className="rounded-full bg-ember/10 px-5 py-2 text-sm font-semibold text-ember hover:bg-ember/20 disabled:cursor-not-allowed disabled:opacity-50"
         >
           {guardandoNuevo ? 'Agregando…' : '+ Agregar'}
         </button>
@@ -662,7 +721,7 @@ function SeccionValoresCuenta({ titulo, subtitulo, tipo, eventoId, onError, pued
               <button onClick={() => setConfirmacion(null)} className="rounded-full border border-ink/20 px-4 py-1.5 text-sm font-semibold text-ink/70 hover:bg-ink/5">Cancelar</button>
               <button
                 onClick={() => { const accion = confirmacion.onConfirmar; setConfirmacion(null); accion(); }}
-                className="rounded-full bg-ember px-4 py-1.5 text-sm font-semibold text-white hover:bg-ember-light"
+                className="rounded-full border border-ember/30 bg-ember/10 px-4 py-1.5 text-sm font-semibold text-ember hover:bg-ember/20"
               >
                 {confirmacion.textoConfirmar}
               </button>

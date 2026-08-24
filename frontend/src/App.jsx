@@ -15,6 +15,7 @@ import AdminEntradasSalidas from './pages/admin/AdminEntradasSalidas.jsx';
 import AdminControlIngresosEgresos from './pages/admin/AdminControlIngresosEgresos.jsx';
 import AdminCatalogoCuentas from './pages/admin/AdminCatalogoCuentas.jsx';
 import AdminUsuarios from './pages/admin/AdminUsuarios.jsx';
+import AdminMantenimiento from './pages/admin/AdminMantenimiento.jsx';
 
 function PaginaPublica({ children }) {
   return (
@@ -55,6 +56,14 @@ function App() {
             element={
               <RutaProtegida rolesPermitidos={['super_admin']}>
                 <AdminUsuarios />
+              </RutaProtegida>
+            }
+          />
+          <Route
+            path="mantenimiento"
+            element={
+              <RutaProtegida rolesPermitidos={['super_admin']}>
+                <AdminMantenimiento />
               </RutaProtegida>
             }
           />

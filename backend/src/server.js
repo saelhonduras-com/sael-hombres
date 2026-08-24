@@ -12,6 +12,7 @@ const saelistasRoutes = require('./routes/saelistas');
 const habitacionesRoutes = require('./routes/habitaciones');
 const financieroRoutes = require('./routes/financiero');
 const usuariosRoutes = require('./routes/usuarios');
+const mantenimientoRoutes = require('./routes/mantenimiento');
 
 const app = express();
 
@@ -31,6 +32,7 @@ app.use('/api', saelistasRoutes);
 app.use('/api', habitacionesRoutes);
 app.use('/api', financieroRoutes);
 app.use('/api', usuariosRoutes);
+app.use('/api', mantenimientoRoutes);
 
 // Manejador de errores centralizado
 app.use((err, req, res, next) => {

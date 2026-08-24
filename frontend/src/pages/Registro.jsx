@@ -119,10 +119,19 @@ export default function Registro() {
   const [inscripcionCompleta, setInscripcionCompleta] = useState(false);
   const [nombreInscrito, setNombreInscrito] = useState('');
   const [mensajeExito, setMensajeExito] = useState('¡Inscripción completada!');
+  const [segundosCargando, setSegundosCargando] = useState(0);
 
   useEffect(() => {
     api.get('/eventos').then((r) => setEventos(r.data)).catch(() => setError('No se pudo cargar la información del evento.'));
   }, []);
+
+  // Cuenta cuánto lleva cargando la página, para poder explicar la espera si
+  // el servidor está despertando tras un período de inactividad.
+  useEffect(() => {
+    if (eventos !== null || error) return;
+    const intervalo = setInterval(() => setSegundosCargando((s) => s + 1), 1000);
+    return () => clearInterval(intervalo);
+  }, [eventos, error]);
 
   // Una vez completada la inscripción, regresa solo al inicio después de
   // unos segundos (con opción de irse antes con el botón manual).
@@ -298,10 +307,18 @@ export default function Registro() {
 
   if (eventos === null && !error) {
     return (
-      <div className="flex min-h-[60vh] items-center justify-center bg-parchment">
-        <div className="flex items-center gap-2 text-sm text-ink/40">
-          <span className="h-4 w-4 animate-spin rounded-full border-2 border-ink/15 border-t-ember" />
-          Cargando…
+      <div className="flex min-h-[60vh] items-center justify-center bg-parchment px-5">
+        <div className="text-center">
+          <div className="flex items-center justify-center gap-2 text-sm text-ink/50">
+            <span className="h-4 w-4 animate-spin rounded-full border-2 border-ink/15 border-t-ember" />
+            Cargando…
+          </div>
+          <p className="mt-3 text-sm text-ink/40">En breve te mostraremos los pasos para tu inscripción.</p>
+          {segundosCargando >= 5 && (
+            <p className="mt-3 max-w-xs text-xs text-ink/30">
+              El servidor puede estar despertando tras un período de inactividad — esto puede tardar hasta 50 segundos. Gracias por tu paciencia.
+            </p>
+          )}
         </div>
       </div>
     );
@@ -490,7 +507,6 @@ export default function Registro() {
             <div className="space-y-4 text-center">
               <h2 className="font-display text-xl font-bold text-ink">Empecemos con tu DNI</h2>
               <label className="block">
-                <span className="mb-1.5 block text-sm font-semibold text-ink/70">Número de DNI (13 dígitos)</span>
                 <input
                   type="text" inputMode="numeric" maxLength={13} value={form.dni}
                   onChange={(e) => actualizar('dni', e.target.value.replace(/\D/g, ''))}
@@ -500,7 +516,7 @@ export default function Registro() {
                   className="w-full rounded-lg border border-ink/15 bg-white px-3 py-3 text-center font-display text-2xl tracking-widest text-ink transition focus:border-ember focus:outline-none focus:ring-4 focus:ring-ember/10"
                   placeholder="0801199012345"
                 />
-                <span className="mt-1 block text-center text-xs text-ink/40">
+                <span className="mt-2 block text-center text-base font-semibold text-ink/50">
                   {form.dni.length}/13 dígitos
                 </span>
               </label>

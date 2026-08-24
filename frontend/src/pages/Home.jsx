@@ -78,7 +78,10 @@ export default function Home() {
         {error && <p className="mt-8 rounded-lg bg-ember/10 p-4 text-center text-ember">{error}</p>}
 
         {eventos === null && !error && (
-          <p className="mt-10 text-center text-ink/40">Cargando…</p>
+          <div className="mt-10 flex items-center justify-center gap-2 text-sm text-ink/50">
+            <span className="h-4 w-4 animate-spin rounded-full border-2 border-ink/15 border-t-ember" />
+            Cargando…
+          </div>
         )}
 
         {eventos !== null && !hayEventos && (
@@ -90,19 +93,42 @@ export default function Home() {
 
         {eventoActual && (
           <div className="mt-10 overflow-hidden rounded-2xl border border-ink/10 bg-white shadow-sm">
+            <div className="flex h-1.5">
+              <span className="flex-1 bg-ember" />
+              <span className="flex-1 bg-gold" />
+              <span className="flex-1 bg-[#007334]" />
+            </div>
             <div className="flex flex-wrap items-center justify-between gap-4 p-8">
               <div>
-                <span className={`text-xs font-semibold uppercase tracking-wide ${eventoActual.abierto ? 'text-flame' : 'text-ink/40'}`}>
+                <span className={`rounded-full px-2.5 py-1 text-xs font-semibold uppercase tracking-wide ${eventoActual.abierto ? 'bg-flame/10 text-flame' : 'bg-ink/5 text-ink/40'}`}>
                   {eventoActual.abierto ? 'Registro abierto' : 'Registro cerrado'}
                 </span>
-                <h3 className="mt-1 font-display text-2xl font-bold text-ink">{eventoActual.nombre}</h3>
+                <h3 className="mt-2 font-display text-2xl font-bold text-ink">{eventoActual.nombre}</h3>
                 <p className="mt-1 text-ink/60">{formatearRango(eventoActual.fecha_inicio, eventoActual.fecha_fin)}</p>
+                {eventoActual.abierto && eventoActual.fecha_limite_registro && (
+                  <p className="mt-2 text-xs text-ink/40">
+                    Inscripción cierra el {new Date(eventoActual.fecha_limite_registro).toLocaleDateString('es-HN', { day: 'numeric', month: 'long' })}
+                  </p>
+                )}
               </div>
+
+              <div className="flex items-center gap-3 text-sm text-ink/50 sm:border-l sm:border-ink/10 sm:pl-6">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 text-ember">
+                  <path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z" />
+                  <circle cx="12" cy="10" r="3" />
+                </svg>
+                <p>
+                  Te esperamos en el<br />
+                  <span className="font-semibold text-ink">CNC de Siguatepeque</span><br />
+                  Honduras C.A.
+                </p>
+              </div>
+
               <Link
                 to="/registro"
                 className={`rounded-full px-6 py-2.5 text-sm font-semibold transition ${
                   eventoActual.abierto
-                    ? 'bg-ink text-parchment hover:bg-ember'
+                    ? 'bg-ember text-white shadow-sm shadow-ember/20 hover:bg-ember-light hover:-translate-y-0.5'
                     : 'cursor-not-allowed bg-ink/10 text-ink/40 pointer-events-none'
                 }`}
               >

@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'react';
+import { useOutletContext } from 'react-router-dom';
 import api, { mensajeError } from '../../api';
 
 const MESES = [
   'Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio',
-  'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre',
+  'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre',
 ];
 
 const vacio = {
@@ -17,6 +18,15 @@ const vacio = {
 function mesEnCursoHonduras() {
   const ahoraHN = new Date(Date.now() - 6 * 60 * 60 * 1000);
   return { mes: ahoraHN.getUTCMonth() + 1, anio: ahoraHN.getUTCFullYear() };
+}
+
+// Nombre del mes siguiente al actual, para decirle a la persona hasta
+// cuándo dura el bloqueo — no solo "por qué", también "hasta cuándo".
+function proximoMesTexto() {
+  const { mes, anio } = mesEnCursoHonduras();
+  const siguienteMes = mes === 12 ? 1 : mes + 1;
+  const siguienteAnio = mes === 12 ? anio + 1 : anio;
+  return `1 de ${MESES[siguienteMes - 1]} de ${siguienteAnio}`;
 }
 
 // Cuenta regresiva a la fecha límite de registro, mismo estilo que el
@@ -42,6 +52,11 @@ function CajaTiempo({ valor, etiqueta }) {
 }
 
 export default function AdminEventos() {
+  const { rol, permisosPorModulo } = useOutletContext();
+  // Solo el rol "admin" queda sujeto al nivel configurado en Usuarios —
+  // super_admin y los demás roles fijos quedan exactamente como estaban.
+  const puedeEditar = rol === 'admin' ? permisosPorModulo?.['eventos'] === 'edicion' : true;
+
   const [eventos, setEventos] = useState([]);
   const [conteos, setConteos] = useState({}); // { [eventoId]: { total, confirmados } }
   const [cargando, setCargando] = useState(true);
@@ -49,6 +64,8 @@ export default function AdminEventos() {
   const [editando, setEditando] = useState(null); // id o 'nuevo'
   const [form, setForm] = useState(vacio);
   const [guardando, setGuardando] = useState(false);
+  // Bloqueado por defecto — evita clics accidentales en Editar/Eliminar evento.
+  const [modoEdicion, setModoEdicion] = useState(false);
   const [confirmacion, setConfirmacion] = useState(null); // { mensaje, textoConfirmar, onConfirmar } | null
   const [negacion, setNegacion] = useState(false); // true = mostrar el modal de "esto no se puede"
   const [bloqueoMes, setBloqueoMes] = useState(null); // string | null = mensaje del bloqueo duro por mes en curso
@@ -110,7 +127,7 @@ export default function AdminEventos() {
       const intentaQuitarleActual = esElDelMes && eventoDelMes.es_actual && !form.es_actual;
       if (intentaCambiarloAOtro || intentaQuitarleActual) {
         setBloqueoMes(
-          `No se puede cambiar el evento actual ni su registro mientras estemos en el mes de "${eventoDelMes.nombre}". Este bloqueo es intencional — se libera solo cuando cambie el mes.`
+          `No se puede cambiar el evento actual ni su registro mientras estemos en el mes de "${eventoDelMes.nombre}". Este bloqueo es intencional — se libera solo automáticamente a partir del ${proximoMesTexto()}, sin que nadie tenga que hacer nada.`
         );
         return;
       }
@@ -155,68 +172,122 @@ export default function AdminEventos() {
 
   const claseInput = 'w-full rounded-lg border border-ink/15 px-3 py-2 text-sm focus:border-ember focus:outline-none';
 
+  // Para el aviso permanente de arriba — mismo criterio que usa guardar().
+  const { mes: mesHoyBanner, anio: anioHoyBanner } = mesEnCursoHonduras();
+  const eventoDelMesActual = eventos.find((e) => Number(e.mes) === mesHoyBanner && Number(e.anio) === anioHoyBanner);
+
   return (
     <div>
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-2">
         <h1 className="font-display text-2xl font-bold text-ink">Eventos</h1>
         {!editando && (
-          <button onClick={abrirNuevo} className="rounded-full bg-ember/10 px-5 py-2 text-sm font-semibold text-ember hover:bg-ember/20">
-            + Nuevo evento
-          </button>
+          <div className="flex flex-wrap items-center gap-3">
+            <button
+              onClick={() => puedeEditar && setModoEdicion((m) => !m)}
+              disabled={!puedeEditar}
+              className={`rounded-full px-4 py-2 text-sm font-semibold transition ${
+                !puedeEditar
+                  ? 'cursor-not-allowed bg-ink/5 text-ink/30'
+                  : modoEdicion ? 'bg-[#007334] text-white hover:bg-[#005c29]' : 'border border-ink/20 text-ink/70 hover:bg-ink/5'
+              }`}
+            >
+              {!puedeEditar ? '🔒 Solo consulta' : modoEdicion ? '🔓 Edición activada' : '🔒 Activar edición'}
+            </button>
+            <button
+              onClick={abrirNuevo}
+              disabled={!modoEdicion}
+              className="rounded-full bg-ember/10 px-5 py-2 text-sm font-semibold text-ember hover:bg-ember/20 disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              + Nuevo evento
+            </button>
+          </div>
         )}
       </div>
+      {!editando && eventoDelMesActual && (
+        <div className="mt-3 flex items-start gap-3 rounded-xl border-2 border-night/20 bg-night/5 px-4 py-3.5 text-base text-night">
+          <span className="shrink-0 text-2xl">🔒</span>
+          <span>
+            <span className="font-display font-bold uppercase tracking-wide">Aviso importante:</span> estás en el mes de{' '}
+            <strong>{eventoDelMesActual.nombre}</strong> — el evento actual y su registro quedan bloqueados hasta el{' '}
+            <strong>{proximoMesTexto()}</strong>, cuando se liberan solos, sin que nadie tenga que hacer nada.
+          </span>
+        </div>
+      )}
+      {!editando && !modoEdicion && (
+        <p className="mt-2 text-xs text-ink/40">Activa la edición arriba para crear, editar o eliminar eventos.</p>
+      )}
 
       {error && <p className="mt-4 rounded-lg bg-ember/10 p-3 text-sm text-ember">{error}</p>}
 
       {editando && (
-        <div className="mx-auto mt-4 max-w-2xl rounded-2xl border border-ink/10 bg-white p-6 shadow-sm">
-          <h2 className="font-display text-lg font-bold text-ink">{editando === 'nuevo' ? 'Nuevo evento' : 'Editar evento'}</h2>
-          <div className="mt-4 grid gap-4 sm:grid-cols-2">
-            <label className="sm:col-span-2">
+        <div className="mx-auto mt-4 max-w-xl overflow-hidden rounded-2xl border border-ink/10 bg-white shadow-sm">
+          <div className="flex h-1.5">
+            <span className="flex-1 bg-ember" />
+            <span className="flex-1 bg-gold" />
+            <span className="flex-1 bg-[#007334]" />
+          </div>
+          <div className="p-5">
+            <h2 className="font-display text-lg font-bold text-ink">{editando === 'nuevo' ? 'Nuevo evento' : 'Editar evento'}</h2>
+
+            <label className="mt-4 block">
               <span className="mb-1 block text-xs font-semibold text-ink/60">Nombre</span>
               <input type="text" value={form.nombre} onChange={(e) => setForm((f) => ({ ...f, nombre: e.target.value }))} className={claseInput} placeholder="SAEL Septiembre 2026" />
             </label>
-            <label>
-              <span className="mb-1 block text-xs font-semibold text-ink/60">Año</span>
-              <input type="number" value={form.anio} onChange={(e) => setForm((f) => ({ ...f, anio: Number(e.target.value) }))} className={claseInput} />
-            </label>
-            <label>
-              <span className="mb-1 block text-xs font-semibold text-ink/60">Mes</span>
-              <select value={form.mes} onChange={(e) => setForm((f) => ({ ...f, mes: Number(e.target.value) }))} className={claseInput}>
-                {MESES.map((m, i) => <option key={m} value={i + 1}>{m}</option>)}
-              </select>
-            </label>
-            <label>
-              <span className="mb-1 block text-xs font-semibold text-ink/60">Fecha inicio</span>
-              <input type="date" value={form.fecha_inicio} onChange={(e) => setForm((f) => ({ ...f, fecha_inicio: e.target.value }))} className={claseInput} />
-            </label>
-            <label>
-              <span className="mb-1 block text-xs font-semibold text-ink/60">Fecha fin</span>
-              <input type="date" value={form.fecha_fin} onChange={(e) => setForm((f) => ({ ...f, fecha_fin: e.target.value }))} className={claseInput} />
-            </label>
-            <label className="sm:col-span-2">
-              <span className="mb-1 block text-xs font-semibold text-ink/60">Fecha límite de registro</span>
-              <input type="date" value={form.fecha_limite_registro} onChange={(e) => setForm((f) => ({ ...f, fecha_limite_registro: e.target.value }))} className={claseInput} />
-            </label>
-            <label className="flex items-center gap-2">
-              <input type="checkbox" checked={form.abierto} onChange={(e) => setForm((f) => ({ ...f, abierto: e.target.checked }))} />
-              <span className="text-sm text-ink/70">Registro abierto</span>
-            </label>
-            <label className="flex items-center gap-2">
-              <input type="checkbox" checked={form.es_actual} onChange={(e) => setForm((f) => ({ ...f, es_actual: e.target.checked }))} />
-              <span className="text-sm text-ink/70">Marcar como evento actual</span>
-            </label>
-            {form.es_actual && eventos.some((e) => e.es_actual && e.id !== editando) && (
-              <p className="sm:col-span-2 rounded-lg bg-flame/10 px-3 py-2 text-xs text-flame">
-                ⚠️ Esto reemplazará a "{eventos.find((e) => e.es_actual && e.id !== editando)?.nombre}" como el evento actual.
-              </p>
-            )}
-          </div>
-          <div className="mt-6 flex justify-end gap-3">
-            <button onClick={() => setEditando(null)} className="rounded-full border border-ink/20 px-5 py-2 text-sm font-semibold text-ink/70 hover:bg-ink/5">Cancelar</button>
-            <button onClick={guardar} disabled={guardando} className="rounded-full bg-ember/10 px-5 py-2 text-sm font-semibold text-ember hover:bg-ember/20 disabled:opacity-50">
-              {guardando ? 'Guardando…' : 'Guardar'}
-            </button>
+
+            <p className="mb-1.5 mt-4 text-[11px] font-semibold uppercase tracking-wide text-ink/40">Fechas</p>
+            <div className="grid grid-cols-2 gap-x-3 gap-y-3">
+              <label>
+                <span className="mb-1 block text-xs font-semibold text-ink/60">Mes</span>
+                <select value={form.mes} onChange={(e) => setForm((f) => ({ ...f, mes: Number(e.target.value) }))} className={claseInput}>
+                  {MESES.map((m, i) => <option key={m} value={i + 1}>{m}</option>)}
+                </select>
+              </label>
+              <label>
+                <span className="mb-1 block text-xs font-semibold text-ink/60">Año</span>
+                <input type="number" value={form.anio} onChange={(e) => setForm((f) => ({ ...f, anio: Number(e.target.value) }))} className={claseInput} />
+              </label>
+              <label>
+                <span className="mb-1 block text-xs font-semibold text-ink/60">Fecha inicio</span>
+                <input type="date" value={form.fecha_inicio} onChange={(e) => setForm((f) => ({ ...f, fecha_inicio: e.target.value }))} className={claseInput} />
+              </label>
+              <label>
+                <span className="mb-1 block text-xs font-semibold text-ink/60">Fecha fin</span>
+                <input type="date" value={form.fecha_fin} onChange={(e) => setForm((f) => ({ ...f, fecha_fin: e.target.value }))} className={claseInput} />
+              </label>
+              <label className="col-span-2">
+                <span className="mb-1 block text-xs font-semibold text-ink/60">Fecha límite de registro</span>
+                <input type="date" value={form.fecha_limite_registro} onChange={(e) => setForm((f) => ({ ...f, fecha_limite_registro: e.target.value }))} className={claseInput} />
+              </label>
+            </div>
+
+            <p className="mb-1.5 mt-4 text-[11px] font-semibold uppercase tracking-wide text-ink/40">Estado</p>
+            <div className="flex flex-col gap-2 rounded-lg bg-ink/5 p-3">
+              <label className="flex items-center gap-2">
+                <input type="checkbox" checked={form.abierto} onChange={(e) => setForm((f) => ({ ...f, abierto: e.target.checked }))} />
+                <span className="text-sm text-ink/70">Registro abierto</span>
+              </label>
+              <label className="flex items-center gap-2">
+                <input type="checkbox" checked={form.es_actual} onChange={(e) => setForm((f) => ({ ...f, es_actual: e.target.checked }))} />
+                <span className="text-sm text-ink/70">Marcar como evento actual</span>
+              </label>
+              {form.es_actual && !form.abierto && (
+                <p className="rounded-lg bg-[#1F3464]/10 px-3 py-2 text-xs text-[#1F3464]">
+                  💡 Marcarlo como actual no abre el registro solo — si quieres que el público ya pueda inscribirse, activa también "Registro abierto" arriba.
+                </p>
+              )}
+              {form.es_actual && eventos.some((e) => e.es_actual && e.id !== editando) && (
+                <p className="rounded-lg bg-flame/10 px-3 py-2 text-xs text-flame">
+                  ⚠️ Esto reemplazará a "{eventos.find((e) => e.es_actual && e.id !== editando)?.nombre}" como el evento actual.
+                </p>
+              )}
+            </div>
+
+            <div className="mt-5 flex justify-end gap-3">
+              <button onClick={() => setEditando(null)} className="rounded-full border border-ink/20 px-5 py-2 text-sm font-semibold text-ink/70 hover:bg-ink/5">Cancelar</button>
+              <button onClick={guardar} disabled={guardando} className="rounded-full bg-ember/10 px-5 py-2 text-sm font-semibold text-ember hover:bg-ember/20 disabled:opacity-50">
+                {guardando ? 'Guardando…' : 'Guardar'}
+              </button>
+            </div>
           </div>
         </div>
       )}
@@ -261,10 +332,18 @@ export default function AdminEventos() {
                   )}
 
                   <div className="ml-auto flex shrink-0 gap-2">
-                    <button onClick={() => abrirEditar(ev)} className="rounded-full bg-[#007334]/10 px-3 py-1 text-xs font-semibold text-[#007334] hover:bg-[#007334]/20">
+                    <button
+                      onClick={() => abrirEditar(ev)}
+                      disabled={!modoEdicion}
+                      className="rounded-full bg-[#007334]/10 px-3 py-1 text-xs font-semibold text-[#007334] hover:bg-[#007334]/20 disabled:cursor-not-allowed disabled:opacity-40"
+                    >
                       Editar
                     </button>
-                    <button onClick={() => eliminar(ev.id, ev.nombre)} className="rounded-full bg-ember/10 px-3 py-1 text-xs font-semibold text-ember hover:bg-ember/20">
+                    <button
+                      onClick={() => eliminar(ev.id, ev.nombre)}
+                      disabled={!modoEdicion}
+                      className="rounded-full bg-ember/10 px-3 py-1 text-xs font-semibold text-ember hover:bg-ember/20 disabled:cursor-not-allowed disabled:opacity-40"
+                    >
                       Eliminar
                     </button>
                   </div>

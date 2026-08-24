@@ -341,6 +341,21 @@ router.get('/admin/participantes/estadisticas', requireAuth, requireModulo('part
 router.put('/admin/participantes/:id/ocultar', requireAuth, requireModulo('participantes', 'edicion'), async (req, res) => {
   const { id } = req.params;
   try {
+    const participante = await pool.query(`SELECT * FROM participantes WHERE id = $1`, [id]);
+    if (participante.rows.length === 0) {
+      return res.status(404).json({ error: 'Participante no encontrado.' });
+    }
+    const fila = participante.rows[0];
+
+    // Guarda una copia completa ANTES de ocultar — así aparece en la
+    // Papelera del módulo de Mantenimiento (solo Super Admin) y se puede
+    // restaurar con un clic, sin necesitar SQL directo.
+    await pool.query(
+      `INSERT INTO papelera (tipo, descripcion, tabla_origen, datos)
+       VALUES ('Participante', $1, 'participantes', $2)`,
+      [fila.nombre_completo, JSON.stringify(fila)]
+    );
+
     const { rows } = await pool.query(
       `UPDATE participantes SET oculto = true WHERE id = $1 RETURNING id`,
       [id]
@@ -350,6 +365,7 @@ router.put('/admin/participantes/:id/ocultar', requireAuth, requireModulo('parti
     }
     res.json({ ok: true });
   } catch (err) {
+    console.error('Error en PUT /admin/participantes/:id/ocultar:', err);
     res.status(500).json({ error: 'No se pudo ocultar al participante.' });
   }
 });
@@ -401,36 +417,33 @@ router.delete('/admin/inscripciones/:id', requireAuth, requireModulo('participan
   try {
     await client.query('BEGIN');
 
-    const inscripcion = await client.query(
-      `SELECT participante_id, registrado_presencial FROM inscripciones WHERE id = $1`,
-      [id]
-    );
+    const inscripcion = await client.query(`SELECT * FROM inscripciones WHERE id = $1`, [id]);
     if (inscripcion.rows.length === 0) {
       await client.query('ROLLBACK');
       return res.status(404).json({ error: 'Inscripción no encontrada.' });
     }
-    if (inscripcion.rows[0].registrado_presencial) {
+    const fila = inscripcion.rows[0];
+    if (fila.registrado_presencial) {
       await client.query('ROLLBACK');
       return res.status(400).json({
         error: 'No se puede eliminar una inscripción con asistencia confirmada. Desmarca "Registrado" primero si fue un error.',
       });
     }
 
-    const participante_id = inscripcion.rows[0].participante_id;
+    // Mismo patrón que SFL: la inscripción se archiva (no se pierde el
+    // rastro de que existió) y se borra de la tabla viva — pero la ficha
+    // del participante NUNCA se toca aquí. Su DNI sigue existiendo, así
+    // que si esta persona se vuelve a inscribir en un evento futuro, el
+    // sistema la reconoce sola por DNI, sin duplicados ni ambigüedad.
+    await client.query(
+      `INSERT INTO inscripciones_historial (inscripcion_id, participante_id, evento_id, motivo, datos)
+       VALUES ($1, $2, $3, 'eliminado', $4)`,
+      [fila.id, fila.participante_id, fila.evento_id, JSON.stringify(fila)]
+    );
     await client.query(`DELETE FROM inscripciones WHERE id = $1`, [id]);
 
-    const restantes = await client.query(
-      `SELECT COUNT(*) FROM inscripciones WHERE participante_id = $1`,
-      [participante_id]
-    );
-    let participante_eliminado = false;
-    if (parseInt(restantes.rows[0].count, 10) === 0) {
-      await client.query(`DELETE FROM participantes WHERE id = $1`, [participante_id]);
-      participante_eliminado = true;
-    }
-
     await client.query('COMMIT');
-    res.json({ ok: true, participante_eliminado });
+    res.json({ ok: true });
   } catch (err) {
     await client.query('ROLLBACK');
     res.status(500).json({ error: 'No se pudo eliminar la inscripción.' });
@@ -691,7 +704,7 @@ router.put('/admin/inscripciones/:id/presencial', requireAuth, requireModulo('pa
 async function obtenerFilasDiplomas(evento_id) {
   const { rows } = await pool.query(
     `SELECT p.zona, p.capitulo, p.nombre_completo, p.veces_saeles_previas,
-            i.alimentacion_monto, i.metodo_pago,
+            i.alimentacion_monto, i.metodo_pago, i.observaciones_pago,
             (SELECT COUNT(*) FROM inscripciones i2
                WHERE i2.participante_id = p.id AND i2.registrado_presencial = true) AS confirmadas
      FROM inscripciones i
@@ -859,17 +872,24 @@ router.get('/admin/eventos/:evento_id/diplomas/pdf', requireAuth, requireModulo(
     col.transferencia = col.efectivo + anchoCol.efectivo;
     col.tarjeta = col.transferencia + anchoCol.transferencia;
 
-    function celda(texto, x, y, ancho) {
-      doc.text(texto, x, y, { width: ancho, align: 'center', ellipsis: true, lineBreak: false });
+    function celda(texto, x, y, ancho, alineacion = 'center') {
+      doc.text(texto, x, y, { width: ancho, align: alineacion, ellipsis: true, lineBreak: false });
+    }
+
+    // Igual que celda(), pero permite que el texto se envuelva a varias
+    // líneas en vez de cortarse con "..." — para Zona/Capítulo/Nombre, que
+    // se piden completos y a la izquierda.
+    function celdaEnvuelta(texto, x, y, ancho) {
+      doc.text(texto, x, y, { width: ancho, align: 'left' });
     }
 
     function encabezadosTabla() {
       const y = doc.y;
       doc.fontSize(8).fillColor('#000000');
       celda('#', col.num, y, anchoCol.num);
-      celda('ZONA', col.zona, y, anchoCol.zona);
-      celda('CAPÍTULO', col.capitulo, y, anchoCol.capitulo);
-      celda('NOMBRE', col.nombre, y, anchoCol.nombre);
+      celda('ZONA', col.zona, y, anchoCol.zona, 'left');
+      celda('CAPÍTULO', col.capitulo, y, anchoCol.capitulo, 'left');
+      celda('NOMBRE', col.nombre, y, anchoCol.nombre, 'left');
       celda('1ER SAEL', col.primera, y, anchoCol.primera);
       celda('EFECTIVO', col.efectivo, y, anchoCol.efectivo);
       celda('TRANSF.', col.transferencia, y, anchoCol.transferencia);
@@ -882,40 +902,66 @@ router.get('/admin/eventos/:evento_id/diplomas/pdf', requireAuth, requireModulo(
     encabezadoPagina();
     encabezadosTabla();
 
-    const altoFila = 18; // fijo, para que las filas nunca se encimen sin importar la fuente
     rows.forEach((r, i) => {
+      doc.fontSize(7).fillColor('#000000');
+      // Zona/Capítulo/Nombre ahora se envuelven completos en vez de
+      // cortarse — hay que medir cuánto ocupa cada una de verdad antes de
+      // decidir la altura de la fila, o se encima con la siguiente.
+      const alturaZona = doc.heightOfString(r.zona || '', { width: anchoCol.zona });
+      const alturaCapitulo = doc.heightOfString(r.capitulo || '', { width: anchoCol.capitulo });
+      const alturaNombre = doc.heightOfString(r.nombre_completo, { width: anchoCol.nombre });
+      const alturaDatos = Math.max(alturaZona, alturaCapitulo, alturaNombre, 10);
+
+      // Observación de pago (ej. motivo de una cortesía) — se agrega como
+      // una notita debajo del nombre solo cuando esa persona tiene algo
+      // escrito. Se mide su altura real para que tampoco se encime.
+      const anchoObs = anchoCol.nombre + anchoCol.primera + anchoCol.efectivo;
+      const alturaObs = r.observaciones_pago
+        ? doc.heightOfString(`Obs: ${r.observaciones_pago}`, { width: anchoObs })
+        : 0;
+      const altoFila = alturaDatos + 6 + (alturaObs ? alturaObs + 2 : 0);
+
       if (doc.y + altoFila > doc.page.height - 40) {
         doc.addPage({ size: 'letter', margin: 0, layout: 'portrait' });
         encabezadoPagina();
         encabezadosTabla();
+        doc.fontSize(7).fillColor('#000000');
       }
       const y = doc.y;
-      doc.fontSize(7).fillColor('#000000');
       celda(String(i + 1), col.num, y, anchoCol.num);
-      celda(r.zona || '', col.zona, y, anchoCol.zona);
-      celda(r.capitulo || '', col.capitulo, y, anchoCol.capitulo);
-      celda(r.nombre_completo, col.nombre, y, anchoCol.nombre);
+      celdaEnvuelta(r.zona || '', col.zona, y, anchoCol.zona);
+      celdaEnvuelta(r.capitulo || '', col.capitulo, y, anchoCol.capitulo);
+      celdaEnvuelta(r.nombre_completo, col.nombre, y, anchoCol.nombre);
       celda(r.total_saeles === 1 ? '1' : '', col.primera, y, anchoCol.primera);
       celda(r.metodo_pago === 'efectivo' && r.alimentacion_monto ? `L.${r.alimentacion_monto}` : '', col.efectivo, y, anchoCol.efectivo);
       celda(r.metodo_pago === 'transferencia' && r.alimentacion_monto ? `L.${r.alimentacion_monto}` : '', col.transferencia, y, anchoCol.transferencia);
       celda(r.metodo_pago === 'tarjeta' && r.alimentacion_monto ? `L.${r.alimentacion_monto}` : '', col.tarjeta, y, anchoCol.tarjeta);
+
+      if (r.observaciones_pago) {
+        doc.font('Helvetica-Oblique').fontSize(6).fillColor('#666666');
+        doc.text(`Obs: ${r.observaciones_pago}`, col.nombre, y + alturaDatos + 2, { width: anchoObs });
+        doc.font('Helvetica').fontSize(7).fillColor('#000000');
+      }
+
       doc.y = y + altoFila;
     });
 
-    // Resumen de totales por método de pago, al final de la tabla.
-    if (doc.y + 60 > doc.page.height - 40) {
+    // Resumen de totales, alineado bajo cada columna real — igual que ya
+    // se hizo en el reporte de Control de Ingresos & Egresos.
+    if (doc.y + 40 > doc.page.height - 40) {
       doc.addPage({ size: 'letter', margin: 0, layout: 'portrait' });
       encabezadoPagina();
     }
     doc.y += 10;
     doc.moveTo(inicioTabla, doc.y).lineTo(inicioTabla + anchoTabla, doc.y).strokeColor('#1F3464').lineWidth(1.5).stroke();
     doc.y += 8;
-    doc.font('Helvetica-Bold').fontSize(9).fillColor('#1F3464');
-    doc.text(`Total Efectivo: L.${totalesPago.efectivo.toFixed(2)}`, inicioTabla, doc.y, { width: anchoTabla, align: 'left', lineBreak: false });
-    doc.y += 14;
-    doc.text(`Total Transferencia Bancaria: L.${totalesPago.transferencia.toFixed(2)}`, inicioTabla, doc.y, { width: anchoTabla, align: 'left', lineBreak: false });
-    doc.y += 14;
-    doc.text(`Total Tarjeta Crédito/Débito: L.${totalesPago.tarjeta.toFixed(2)}`, inicioTabla, doc.y, { width: anchoTabla, align: 'left', lineBreak: false });
+    const yTotalesDiplomas = doc.y;
+    doc.font('Helvetica-Bold').fontSize(8).fillColor('#1F3464');
+    celda('TOTALES', col.capitulo, yTotalesDiplomas, anchoCol.capitulo + anchoCol.nombre, 'left');
+    celda(String(total_primera_vez), col.primera, yTotalesDiplomas, anchoCol.primera);
+    celda(`L.${totalesPago.efectivo.toFixed(2)}`, col.efectivo, yTotalesDiplomas, anchoCol.efectivo);
+    celda(`L.${totalesPago.transferencia.toFixed(2)}`, col.transferencia, yTotalesDiplomas, anchoCol.transferencia);
+    celda(`L.${totalesPago.tarjeta.toFixed(2)}`, col.tarjeta, yTotalesDiplomas, anchoCol.tarjeta);
     doc.font('Helvetica');
 
     doc.end();
@@ -984,7 +1030,8 @@ router.get('/admin/eventos/:evento_id/costos', requireAuth, requireModulo('parti
   const { evento_id } = req.params;
   try {
     const { rows } = await pool.query(
-      `SELECT c.id, c.concepto, c.monto, c.modulo_id, c.es_boleto, m.nombre AS modulo_nombre
+      `SELECT c.id, c.concepto, c.monto, c.modulo_id, c.es_boleto, c.cuenta_efectivo_id, c.cuenta_bancos_id,
+              m.nombre AS modulo_nombre
        FROM eventos_costos c
        LEFT JOIN modulos m ON m.id = c.modulo_id
        WHERE c.evento_id = $1
@@ -993,6 +1040,7 @@ router.get('/admin/eventos/:evento_id/costos', requireAuth, requireModulo('parti
     );
     res.json(rows);
   } catch (err) {
+    console.error('Error en GET /admin/eventos/:evento_id/costos:', err);
     res.status(500).json({ error: 'No se pudo obtener los costos del evento.' });
   }
 });
@@ -1093,17 +1141,17 @@ router.delete('/admin/eventos-costos/:id', requireAuth, requireModulo('participa
 // en un evento específico. Upsert por evento+concepto('Hotel')+modulo_id.
 router.put('/admin/eventos/:evento_id/costos-modulo/:modulo_id', requireAuth, requireModulo('entradas_salidas', 'edicion'), async (req, res) => {
   const { evento_id, modulo_id } = req.params;
-  const { monto } = req.body;
+  const { monto, cuenta_efectivo_id, cuenta_bancos_id } = req.body;
   if (monto === undefined || monto === null) {
     return res.status(400).json({ error: 'Falta el monto.' });
   }
   try {
     await pool.query(
-      `INSERT INTO eventos_costos (evento_id, concepto, monto, modulo_id)
-       VALUES ($1, 'Hotel', $2, $3)
+      `INSERT INTO eventos_costos (evento_id, concepto, monto, modulo_id, cuenta_efectivo_id, cuenta_bancos_id)
+       VALUES ($1, 'Hotel', $2, $3, $4, $5)
        ON CONFLICT (evento_id, concepto, modulo_id) WHERE modulo_id IS NOT NULL
-       DO UPDATE SET monto = EXCLUDED.monto`,
-      [evento_id, monto, modulo_id]
+       DO UPDATE SET monto = EXCLUDED.monto, cuenta_efectivo_id = EXCLUDED.cuenta_efectivo_id, cuenta_bancos_id = EXCLUDED.cuenta_bancos_id`,
+      [evento_id, monto, modulo_id, cuenta_efectivo_id || null, cuenta_bancos_id || null]
     );
     res.json({ ok: true });
   } catch (err) {

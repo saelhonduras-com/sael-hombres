@@ -76,6 +76,33 @@ export default function AdminControlIngresosEgresos() {
     }
   }
 
+  // "Imprimir" abre el PDF real (mismo diseño que el botón PDF) en una
+  // pestaña nueva, para imprimir desde el visor de PDF del navegador — así
+  // se ve idéntico al PDF descargado, en vez de imprimir la página web con
+  // otro diseño.
+  async function imprimir() {
+    if (!eventoActual) return;
+    // Se abre la pestaña ANTES de la llamada async, porque si se abre
+    // después de un await, la mayoría de navegadores lo bloquea como pop-up.
+    const ventana = window.open('', '_blank');
+    setExportando('imprimir');
+    setError('');
+    try {
+      const { data } = await api.get(`/admin/eventos/${eventoActual.id}/control-financiero/pdf`, { responseType: 'blob' });
+      const url = window.URL.createObjectURL(new Blob([data], { type: 'application/pdf' }));
+      if (ventana) {
+        ventana.location.href = url;
+      } else {
+        window.location.href = url;
+      }
+    } catch (err) {
+      setError('No se pudo generar la vista de impresión.');
+      if (ventana) ventana.close();
+    } finally {
+      setExportando(null);
+    }
+  }
+
   return (
     <div>
       <div className="print:hidden">
@@ -141,11 +168,11 @@ export default function AdminControlIngresosEgresos() {
             {exportando === 'pdf' ? 'Generando…' : '📄 PDF'}
           </button>
           <button
-            onClick={() => window.print()}
-            disabled={!datosIngresos}
+            onClick={imprimir}
+            disabled={exportando !== null || !datosIngresos}
             className="rounded-full border border-ink/20 px-4 py-1.5 text-xs font-semibold text-ink/70 hover:bg-ink/5 disabled:cursor-not-allowed disabled:opacity-40"
           >
-            🖨️ Imprimir
+            {exportando === 'imprimir' ? 'Preparando…' : '🖨️ Imprimir'}
           </button>
         </div>
       </div>
@@ -215,7 +242,12 @@ function TablaCuentas({ titulo, datos, pestana }) {
 // (Entradas/Salidas de Efectivo, módulo de cobro, Habitaciones,
 // Asistencia de Saelistas, o Catálogo de Cuentas para la estructura).
 function FilaCuenta({ cuenta, nivel }) {
-  const negrita = nivel <= 1;
+  // Negrita para la raíz y para cualquier cuenta que realmente tenga hijos
+  // (es un "padre" de verdad) — antes dependía de un corte fijo de nivel
+  // (nivel <= 1), que dejaba sin negrita a padres más profundos como
+  // "Otros Ingresos" (4.4) aunque tuviera sus propios hijos (4.4.1, 4.4.2...).
+  const esPadre = cuenta.hijos && cuenta.hijos.length > 0;
+  const negrita = nivel === 0 || esPadre;
   const indentacion = { paddingLeft: `${12 + nivel * 20}px` };
 
   return (
@@ -229,7 +261,7 @@ function FilaCuenta({ cuenta, nivel }) {
             : (cuenta.cantidad ?? '')}
         </td>
         <td className="px-3 py-2 text-right">{cuenta.valor !== undefined && cuenta.valor !== null ? formatoL(cuenta.valor) : ''}</td>
-        <td className="px-3 py-2 text-right">{cuenta.origen !== 'categoria' || nivel === 0 ? formatoL(cuenta.monto) : ''}</td>
+        <td className="px-3 py-2 text-right">{formatoL(cuenta.monto)}</td>
       </tr>
       {cuenta.hijos && cuenta.hijos.map((h) => (
         <FilaCuenta key={h.id} cuenta={h} nivel={nivel + 1} />

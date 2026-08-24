@@ -1,5 +1,5 @@
 import { useEffect, useState, useRef } from 'react';
-import { Link, useOutletContext } from 'react-router-dom';
+import { useOutletContext } from 'react-router-dom';
 import api, { mensajeError } from '../../api';
 import {
   DEPARTAMENTOS_HONDURAS,
@@ -329,7 +329,7 @@ export default function AdminParticipantes() {
       return;
     }
     pedirConfirmacion({
-      mensaje: 'Esta inscripción se eliminará. Si era el único registro que esta persona tuvo alguna vez en el sistema, también se eliminará su ficha de participante por completo. Esta acción no se puede deshacer.',
+      mensaje: 'Se eliminará esta inscripción de la lista, pero queda guardada para siempre en el historial — no se pierde el rastro. La ficha del participante no se toca: sigue existiendo con su DNI, así que si vuelve a inscribirse en otro evento, el sistema lo reconoce solo. Hoy no hay un botón en el panel para restaurarla — si necesitas recuperarla, tendría que ser directo en la base de datos.',
       textoConfirmar: 'Sí, eliminar',
       onConfirmar: async () => {
         setError('');
@@ -509,7 +509,7 @@ export default function AdminParticipantes() {
       {error && !cobrando && <p className="mt-4 rounded-lg bg-ember/10 p-3 text-sm text-ember">{error}</p>}
 
       {vista === 'lista' && (
-        <div className="mt-4 grid gap-4 lg:grid-cols-[minmax(0,1fr)_260px]">
+        <div className="mt-4">
           <div>
             <div className="flex flex-wrap items-center justify-between gap-2">
               <div className="flex flex-wrap gap-2">
@@ -726,26 +726,6 @@ export default function AdminParticipantes() {
               </div>
             )}
           </div>
-
-          <aside className="space-y-4">
-            <div className="rounded-2xl border border-ink/10 bg-white p-4 shadow-sm">
-              <h3 className="font-display text-sm font-bold text-ink">Accesos rápidos</h3>
-              <div className="mt-3 space-y-2">
-                {eventoActual && (
-                  <p className="text-xs text-ink/70">
-                    Evento actual: <span className="font-semibold text-ink">{eventoActual.nombre}</span>
-                  </p>
-                )}
-                <Link to="/admin/eventos" className="block w-full rounded-full border border-ink/20 px-4 py-2 text-center text-xs font-semibold text-ink/70 hover:bg-ink/5">
-                  Ver eventos
-                </Link>
-                <Link to="/admin/diplomas" className="block w-full rounded-full border border-ink/20 px-4 py-2 text-center text-xs font-semibold text-ink/70 hover:bg-ink/5">
-                  Ver diplomas
-                </Link>
-                <p className="pt-1 text-xs text-ink/30">Reportería: próximamente</p>
-              </div>
-            </div>
-          </aside>
         </div>
       )}
 

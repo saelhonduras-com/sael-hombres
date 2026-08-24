@@ -123,7 +123,10 @@ async function calcularControlFinanciero(evento_id, tipo) {
   // solas — el resto de Egresos sigue siendo 100% manual.
   let b = { cant_evento: 0, monto_evento: 0, cant_bancos: 0, monto_bancos: 0, cant_tarjeta: 0, monto_tarjeta: 0, cant_cortesia: 0 };
   let totalServidores = 0;
-  let espacios = { rows: [] };
+  let hotelPorCuenta = {}; // { [cuenta_id]: { cant, monto } } — acumulado directo sobre cuentas reales del Catálogo
+  let precioPorCuentaHotel = {}; // { [cuenta_id]: precio por persona configurado en Entradas & Salidas }
+  let observacionesPorClave = {}; // { [clave_sistema]: [{nombre, texto}] } — Boletería
+  let observacionesPorCuentaHotel = {}; // { [cuenta_id]: [{nombre, texto}] } — Hotel
   let totalEventoHeadcount = 0;
   let totalVigiliaHeadcount = 0;
   let precioPorCuenta = {};
@@ -149,6 +152,28 @@ async function calcularControlFinanciero(evento_id, tipo) {
     );
     b = boletos.rows[0];
 
+    // Observaciones de pago de Boletería (ej. motivo de una cortesía) —
+    // se agrupan por el mismo criterio que ya separa efectivo/bancos/
+    // tarjeta/cortesía, para poder mostrarlas debajo de cada cuenta.
+    const obsBoletos = await pool.query(
+      `SELECT p.nombre_completo, i.metodo_pago, i.alimentacion_monto, i.observaciones_pago
+       FROM inscripciones i
+       JOIN participantes p ON p.id = i.participante_id
+       WHERE i.evento_id = $1 AND i.registrado_presencial = true
+         AND i.observaciones_pago IS NOT NULL AND i.observaciones_pago != ''`,
+      [evento_id]
+    );
+    obsBoletos.rows.forEach((o) => {
+      const clave = Number(o.alimentacion_monto) === 0 ? 'cortesia'
+        : o.metodo_pago === 'transferencia' ? 'boletos_bancos'
+        : o.metodo_pago === 'tarjeta' ? 'boletos_tarjeta'
+        : o.metodo_pago === 'efectivo' ? 'boletos_evento'
+        : null;
+      if (!clave) return;
+      if (!observacionesPorClave[clave]) observacionesPorClave[clave] = [];
+      observacionesPorClave[clave].push({ nombre: o.nombre_completo, texto: o.observaciones_pago });
+    });
+
     const servidores = await pool.query(
       `SELECT COUNT(*) AS cant FROM saelista_asistencias WHERE evento_id = $1 AND registrado_presencial = true`,
       [evento_id]
@@ -164,29 +189,72 @@ async function calcularControlFinanciero(evento_id, tipo) {
     // OJO: si más adelante alguien bloqueado se asigna también como
     // ocupante real, ambos se sumarían — hay que desbloquear a mano
     // cuando eso pase, para no contar el mismo depósito dos veces.
-    espacios = await pool.query(
-      `WITH combinado AS (
-         SELECT h.modulo_id, o.metodo_pago, o.monto
-         FROM habitacion_ocupantes o
-         JOIN habitaciones h ON h.id = o.habitacion_id
-         WHERE o.evento_id = $1
-         UNION ALL
-         SELECT h.modulo_id, 'transferencia' AS metodo_pago, r.monto
-         FROM habitacion_reservas r
-         JOIN habitaciones h ON h.id = r.habitacion_id
-         WHERE r.evento_id = $1 AND r.monto IS NOT NULL
-       )
-       SELECT m.id AS modulo_id, m.nombre AS modulo_nombre,
-              COUNT(*) FILTER (WHERE c.metodo_pago IN ('efectivo','tarjeta')) AS cant_evento,
-              COALESCE(SUM(c.monto) FILTER (WHERE c.metodo_pago IN ('efectivo','tarjeta')), 0) AS monto_evento,
-              COUNT(*) FILTER (WHERE c.metodo_pago = 'transferencia') AS cant_bancos,
-              COALESCE(SUM(c.monto) FILTER (WHERE c.metodo_pago = 'transferencia'), 0) AS monto_bancos
-       FROM combinado c
-       JOIN modulos m ON m.id = c.modulo_id
-       GROUP BY m.id, m.nombre
-       ORDER BY m.nombre ASC`,
+    //
+    // Cada módulo tiene, configurada a mano en "Aquí se controla el
+    // ingreso por persona de las habitaciones", una cuenta real del
+    // Catálogo para Efectivo y otra para Bancos (cuenta_efectivo_id /
+    // cuenta_bancos_id en eventos_costos) — el dinero de ese módulo se
+    // suma DIRECTO a esas cuentas reales, con su código y su nombre tal
+    // cual los tengas en el Catálogo. Nada de nombres inventados ni de
+    // adivinar por el precio: si un módulo no tiene cuenta asociada,
+    // simplemente no cuenta hasta que la asocies.
+    const costosModulo = await pool.query(
+      `SELECT modulo_id, monto, cuenta_efectivo_id, cuenta_bancos_id FROM eventos_costos WHERE evento_id = $1 AND concepto = 'Hotel'`,
       [evento_id]
     );
+    const cuentasPorModulo = {};
+    costosModulo.rows.forEach((c) => {
+      cuentasPorModulo[c.modulo_id] = { efectivo: c.cuenta_efectivo_id, bancos: c.cuenta_bancos_id };
+      if (c.cuenta_efectivo_id) precioPorCuentaHotel[c.cuenta_efectivo_id] = Number(c.monto);
+      if (c.cuenta_bancos_id) precioPorCuentaHotel[c.cuenta_bancos_id] = Number(c.monto);
+    });
+
+    const combinadoHotel = await pool.query(
+      `SELECT h.modulo_id, o.metodo_pago, o.monto
+       FROM habitacion_ocupantes o
+       JOIN habitaciones h ON h.id = o.habitacion_id
+       WHERE o.evento_id = $1
+       UNION ALL
+       SELECT h.modulo_id, 'transferencia' AS metodo_pago, r.monto
+       FROM habitacion_reservas r
+       JOIN habitaciones h ON h.id = r.habitacion_id
+       WHERE r.evento_id = $1 AND r.monto IS NOT NULL AND r.es_reserva_seguridad = false`,
+      [evento_id]
+    );
+    // hotelPorCuenta = { [cuenta_id]: { cant, monto } } — se acumula
+    // directo sobre la cuenta real asociada, no sobre un renglón inventado.
+    combinadoHotel.rows.forEach((r) => {
+      const asociadas = cuentasPorModulo[r.modulo_id];
+      if (!asociadas) return; // módulo sin ninguna cuenta configurada todavía
+      const grupo = r.metodo_pago === 'transferencia' ? 'bancos' : 'efectivo';
+      const cuentaId = asociadas[grupo];
+      if (!cuentaId) return; // ese método de pago específico no tiene cuenta asociada
+      if (!hotelPorCuenta[cuentaId]) hotelPorCuenta[cuentaId] = { cant: 0, monto: 0 };
+      hotelPorCuenta[cuentaId].cant += 1;
+      hotelPorCuenta[cuentaId].monto += Number(r.monto || 0);
+    });
+
+    // Observaciones de Hotel — solo existen en habitacion_ocupantes (las
+    // reservas de seguridad no tienen ese campo). Se agrupan por la misma
+    // cuenta real a la que ya cayó su monto.
+    const obsHotel = await pool.query(
+      `SELECT h.modulo_id, o.metodo_pago, COALESCE(p.nombre_completo, s.nombre_completo) AS nombre, o.observaciones
+       FROM habitacion_ocupantes o
+       JOIN habitaciones h ON h.id = o.habitacion_id
+       LEFT JOIN participantes p ON p.id = o.participante_id
+       LEFT JOIN saelistas s ON s.id = o.saelista_id
+       WHERE o.evento_id = $1 AND o.observaciones IS NOT NULL AND o.observaciones != ''`,
+      [evento_id]
+    );
+    obsHotel.rows.forEach((o) => {
+      const asociadas = cuentasPorModulo[o.modulo_id];
+      if (!asociadas) return;
+      const grupo = o.metodo_pago === 'transferencia' ? 'bancos' : 'efectivo';
+      const cuentaId = asociadas[grupo];
+      if (!cuentaId) return;
+      if (!observacionesPorCuentaHotel[cuentaId]) observacionesPorCuentaHotel[cuentaId] = [];
+      observacionesPorCuentaHotel[cuentaId].push({ nombre: o.nombre, texto: o.observaciones });
+    });
   }
 
   if (tipo === 'egreso') {
@@ -241,40 +309,27 @@ async function calcularControlFinanciero(evento_id, tipo) {
     porClave.boletos_evento.cantidad = parseInt(b.cant_evento, 10);
     porClave.boletos_evento.monto = Number(b.monto_evento);
     porClave.boletos_evento.valor = valorPorCuenta[porClave.boletos_evento.id] ?? 0;
+    porClave.boletos_evento.observacionesLista = observacionesPorClave.boletos_evento || [];
   }
   if (porClave.boletos_bancos) {
     porClave.boletos_bancos.cantidad = parseInt(b.cant_bancos, 10);
     porClave.boletos_bancos.monto = Number(b.monto_bancos);
     porClave.boletos_bancos.valor = valorPorCuenta[porClave.boletos_bancos.id] ?? 0;
+    porClave.boletos_bancos.observacionesLista = observacionesPorClave.boletos_bancos || [];
   }
   if (porClave.boletos_tarjeta) {
     porClave.boletos_tarjeta.cantidad = parseInt(b.cant_tarjeta, 10);
     porClave.boletos_tarjeta.monto = Number(b.monto_tarjeta);
     porClave.boletos_tarjeta.valor = valorPorCuenta[porClave.boletos_tarjeta.id] ?? 0;
+    porClave.boletos_tarjeta.observacionesLista = observacionesPorClave.boletos_tarjeta || [];
   }
-  if (porClave.cortesia) { porClave.cortesia.cantidad = parseInt(b.cant_cortesia, 10); porClave.cortesia.valor = 0; porClave.cortesia.monto = 0; }
+  if (porClave.cortesia) {
+    porClave.cortesia.cantidad = parseInt(b.cant_cortesia, 10);
+    porClave.cortesia.valor = 0;
+    porClave.cortesia.monto = 0;
+    porClave.cortesia.observacionesLista = observacionesPorClave.cortesia || [];
+  }
   if (porClave.servidores) { porClave.servidores.cantidad = totalServidores; porClave.servidores.valor = 0; porClave.servidores.monto = 0; }
-
-  if (porClave.aportaciones_espacios) {
-    const hijosEspacios = [];
-    espacios.rows.forEach((m) => {
-      if (Number(m.cant_evento) > 0 || Number(m.monto_evento) > 0) {
-        hijosEspacios.push({
-          id: `modulo-${m.modulo_id}-evento`, origen: 'automatico',
-          nombre: `Hotel en Evento - ${m.modulo_nombre}`,
-          cantidad: parseInt(m.cant_evento, 10), monto: Number(m.monto_evento), valor: 0, hijos: [],
-        });
-      }
-      if (Number(m.cant_bancos) > 0 || Number(m.monto_bancos) > 0) {
-        hijosEspacios.push({
-          id: `modulo-${m.modulo_id}-bancos`, origen: 'automatico',
-          nombre: `Hotel en Bancos - ${m.modulo_nombre}`,
-          cantidad: parseInt(m.cant_bancos, 10), monto: Number(m.monto_bancos), valor: 0, hijos: [],
-        });
-      }
-    });
-    porClave.aportaciones_espacios.hijos = hijosEspacios;
-  }
 
   // Cualquier cuenta SIN clave_sistema (no es de las 4 calculadas) Y SIN
   // hijos propios en el catálogo = es una hoja manual → su monto sale
@@ -286,6 +341,21 @@ async function calcularControlFinanciero(evento_id, tipo) {
       nodo.cantidad = cantidadCapturadaPorCuenta[c.id] ?? 0;
       nodo.valor = unitarioCapturadoPorCuenta[c.id] ?? 0;
     }
+  });
+
+  // Hotel: se suma directo sobre la cuenta REAL del Catálogo que hayas
+  // asociado a cada módulo en Entradas & Salidas — corre después del
+  // bloque de arriba a propósito, para que estas cuentas sí reflejen lo
+  // calculado en vez de quedarse en 0 (que es lo que diría "Entradas de
+  // Efectivo" para ellas, porque ahí ya nadie escribe nada a mano).
+  Object.keys(hotelPorCuenta).forEach((cuentaId) => {
+    const nodo = porId[cuentaId];
+    if (!nodo) return; // por si la cuenta asociada se hubiera borrado del Catálogo
+    nodo.cantidad = hotelPorCuenta[cuentaId].cant;
+    nodo.monto = hotelPorCuenta[cuentaId].monto;
+    nodo.valor = precioPorCuentaHotel[cuentaId] ?? 0; // precio por persona configurado en Entradas & Salidas
+    nodo.observacionesLista = observacionesPorCuentaHotel[cuentaId] || [];
+    nodo._esAutomatico = true; // no se debe podar aunque su origen diga "manual"
   });
 
   // Comidas del evento y de Vigilia Saelistas: precio configurado ×
@@ -336,6 +406,7 @@ async function calcularControlFinanciero(evento_id, tipo) {
       nodo.hijos = nodo.hijos.filter((h) => !debePodarse(h));
       return nodo.hijos.length === 0;
     }
+    if (nodo._esAutomatico) return false; // Hotel ya calculado — siempre se muestra, aunque su origen diga "manual"
     const esManualPura = !nodo.clave_sistema && !nodo.tipo_calculo && nodo.origen === 'manual';
     return esManualPura && !(nodo.id in valorPorCuenta);
   }
@@ -357,19 +428,25 @@ async function calcularControlFinanciero(evento_id, tipo) {
 }
 
 router.get('/admin/eventos/:evento_id/control-ingresos', requireAuth, requireModulo('entradas_salidas', 'consulta'), async (req, res) => {
+  // Sin caché: estos números cambian en vivo (asignaciones, pagos, etc.) —
+  // nunca debe reutilizarse una respuesta vieja del navegador (304).
+  res.set('Cache-Control', 'no-store');
   try {
     const data = await calcularControlFinanciero(req.params.evento_id, 'ingreso');
     res.json(data);
   } catch (err) {
+    console.error('Error en GET /admin/eventos/:evento_id/control-ingresos:', err);
     res.status(500).json({ error: 'No se pudo calcular el Control de Ingresos.' });
   }
 });
 
 router.get('/admin/eventos/:evento_id/control-egresos', requireAuth, requireModulo('entradas_salidas', 'consulta'), async (req, res) => {
+  res.set('Cache-Control', 'no-store');
   try {
     const data = await calcularControlFinanciero(req.params.evento_id, 'egreso');
     res.json(data);
   } catch (err) {
+    console.error('Error en GET /admin/eventos/:evento_id/control-egresos:', err);
     res.status(500).json({ error: 'No se pudo calcular el Control de Egresos.' });
   }
 });
@@ -556,26 +633,31 @@ function aplanarArbol(nodo, nivel, filas) {
     valor: nodo.valor,
     monto: nodo.monto,
     esCategoria: nodo.origen === 'categoria',
+    // Negrita real: cualquier cuenta con hijos es un "padre", sin importar
+    // su origen ni su nivel de profundidad — antes solo se ponía en negrita
+    // por ser "categoria", dejando fuera a padres reales con otro origen.
+    esPadre: !!(nodo.hijos && nodo.hijos.length > 0) || nivel === 0,
+    observacionesLista: nodo.observacionesLista || [],
   });
   if (nodo.hijos) nodo.hijos.forEach((h) => aplanarArbol(h, nivel + 1, filas));
   return filas;
 }
 
 async function obtenerReporteCompleto(evento_id) {
-  const evento = await pool.query(`SELECT nombre FROM eventos WHERE id = $1`, [evento_id]);
+  const evento = await pool.query(`SELECT nombre, anio FROM eventos WHERE id = $1`, [evento_id]);
   const ingresos = await calcularControlFinanciero(evento_id, 'ingreso');
   const egresos = await calcularControlFinanciero(evento_id, 'egreso');
   const totalGlobal = (ingresos.total || 0) - (egresos.total || 0);
-  return { nombreEvento: evento.rows[0]?.nombre || '', ingresos, egresos, totalGlobal };
+  return { nombreEvento: evento.rows[0]?.nombre || '', anioEvento: evento.rows[0]?.anio || '', ingresos, egresos, totalGlobal };
 }
 
 router.get('/admin/eventos/:evento_id/control-financiero/excel', requireAuth, requireModulo('entradas_salidas', 'consulta'), async (req, res) => {
   const { evento_id } = req.params;
   try {
-    const { nombreEvento, ingresos, egresos, totalGlobal } = await obtenerReporteCompleto(evento_id);
+    const { nombreEvento, anioEvento, ingresos, egresos, totalGlobal } = await obtenerReporteCompleto(evento_id);
 
     const filas = [
-      ['Control de Ingresos & Egresos', nombreEvento],
+      ['Control de Ingresos & Egresos', `${nombreEvento} ${anioEvento}`],
       [],
       ['Total Ingresos', ingresos.total],
       ['Total Egresos', egresos.total],
@@ -613,18 +695,49 @@ router.get('/admin/eventos/:evento_id/control-financiero/pdf', requireAuth, requ
   const EMBER = '#E40521';
   const GREEN = '#007334';
   try {
-    const { nombreEvento, ingresos, egresos, totalGlobal } = await obtenerReporteCompleto(evento_id);
+    const { nombreEvento, anioEvento, ingresos, egresos, totalGlobal } = await obtenerReporteCompleto(evento_id);
 
     const doc = new PDFDocument({ margin: 40, size: 'LETTER' });
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', `attachment; filename="control-ingresos-egresos-${evento_id}.pdf"`);
     doc.pipe(res);
 
+    const rutaLogo = require('path').join(__dirname, '..', 'assets', 'logo-fihnec-emblema.png');
+
     function encabezado() {
       doc.rect(0, 0, doc.page.width, 66).fill(NAVY);
-      doc.fillColor('#ffffff').fontSize(16).text('Control de Ingresos & Egresos', 40, 18);
-      doc.fontSize(10).fillColor(GOLD).text(nombreEvento, 40, 40);
+      const altoLogo = 40;
+      const anchoLogo = altoLogo * (923 / 787); // misma proporción real que usa Diplomas — el archivo no es cuadrado
+      const radio = Math.max(altoLogo, anchoLogo) / 2 + 4;
+      const centroX = 40 + radio;
+      const centroY = 33;
+      let xTexto = 40;
+      try {
+        // Círculo blanco de respaldo para que el logo tenga buen contraste
+        // sobre el fondo navy, sea cual sea su combinación de colores.
+        doc.circle(centroX, centroY, radio).fill('#ffffff');
+        doc.image(rutaLogo, centroX - anchoLogo / 2, centroY - altoLogo / 2, { height: altoLogo });
+        xTexto = centroX + radio + 14;
+      } catch (e) {
+        // Si el logo no está presente por alguna razón, seguimos sin tumbar el PDF.
+      }
+      doc.fillColor('#ffffff').fontSize(16).text('Control de Ingresos & Egresos', xTexto, 18);
+      doc.fontSize(10).fillColor(GOLD).text(`${nombreEvento} ${anioEvento}`, xTexto, 40);
     }
+
+    // Pie de página, fijo cerca del borde inferior sin importar cuánto
+    // contenido haya arriba — se llama en cada página, incluida la última.
+    // Se desactiva el margen inferior momentáneamente: PDFKit crea una
+    // página nueva sola si detecta texto más allá del margen configurado,
+    // aunque se le dé una coordenada Y explícita.
+    function pie() {
+      const margenInferior = doc.page.margins.bottom;
+      doc.page.margins.bottom = 0;
+      doc.font('Helvetica').fontSize(8).fillColor('#8a8a8a')
+        .text('C.N.C. FIHNEC · Siguatepeque, Honduras C.A.', 0, doc.page.height - 30, { width: doc.page.width, align: 'center' });
+      doc.page.margins.bottom = margenInferior;
+    }
+
     encabezado();
 
     let y = 86;
@@ -643,20 +756,52 @@ router.get('/admin/eventos/:evento_id/control-financiero/pdf', requireAuth, requ
     y += 62;
 
     function seccion(titulo, color, arbol) {
-      if (y > 700) { doc.addPage(); y = 40; }
+      if (y > 700) { pie(); doc.addPage(); y = 40; }
       doc.fillColor(color).font('Helvetica-Bold').fontSize(13).text(titulo, 40, y);
       y += 20;
       const filas = aplanarArbol(arbol.raiz, 0, []);
       doc.fontSize(9);
       filas.forEach((f) => {
-        if (y > 730) { doc.addPage(); y = 40; encabezado(); y = 86; }
-        doc.font(f.esCategoria ? 'Helvetica-Bold' : 'Helvetica').fillColor('#000000');
+        doc.font(f.esPadre ? 'Helvetica-Bold' : 'Helvetica').fillColor('#000000').fontSize(9);
+        const textoNombre = `${'   '.repeat(f.nivel)}${f.nombre}`;
+        // El nombre puede envolverse a más de una línea si es largo — hay
+        // que medir cuánto ocupa de verdad antes de decidir cuánto bajar
+        // para la siguiente fila, o se encima con la que sigue.
+        const alturaNombre = doc.heightOfString(textoNombre, { width: 230 });
+        const alturaDatos = Math.max(alturaNombre, 12);
+
+        // Observaciones de las personas detrás de esta cuenta (ej. motivo
+        // de una cortesía, o nota de un ocupante de Hotel) — una línea por
+        // observación, medida y sumada a la altura real de la fila.
+        const anchoObs = 480;
+        let alturaObs = 0;
+        const textosObs = (f.observacionesLista || []).map((o) => `• ${o.nombre}: ${o.texto}`);
+        if (textosObs.length > 0) {
+          doc.fontSize(7);
+          alturaObs = textosObs.reduce((s, t) => s + doc.heightOfString(t, { width: anchoObs }), 0) + 2;
+          doc.fontSize(9);
+        }
+        const alturaFila = alturaDatos + 4 + (alturaObs ? alturaObs + 2 : 0);
+
+        if (y + alturaFila > 730) { pie(); doc.addPage(); y = 40; encabezado(); y = 86; doc.fontSize(9); }
+        doc.font(f.esPadre ? 'Helvetica-Bold' : 'Helvetica').fillColor('#000000').fontSize(9);
         doc.text(f.codigo, 40, y, { width: 45 });
-        doc.text(`${'   '.repeat(f.nivel)}${f.nombre}`, 90, y, { width: 230 });
+        doc.text(textoNombre, 90, y, { width: 230 });
         doc.text(f.cantidad !== undefined && f.cantidad !== null ? String(f.cantidad) : '', 320, y, { width: 45, align: 'right' });
         doc.text(f.valor !== undefined && f.valor !== null ? formatoL(f.valor) : '', 365, y, { width: 75, align: 'right' });
         doc.text(formatoL(f.monto), 445, y, { width: 90, align: 'right' });
-        y += 14;
+
+        if (textosObs.length > 0) {
+          let yObs = y + alturaDatos + 2;
+          doc.font('Helvetica-Oblique').fontSize(7).fillColor('#666666');
+          textosObs.forEach((t) => {
+            doc.text(t, 90, yObs, { width: anchoObs });
+            yObs += doc.heightOfString(t, { width: anchoObs });
+          });
+          doc.font('Helvetica').fontSize(9).fillColor('#000000');
+        }
+
+        y += alturaFila;
       });
       y += 14;
     }
@@ -664,6 +809,16 @@ router.get('/admin/eventos/:evento_id/control-financiero/pdf', requireAuth, requ
     seccion('Ingresos', GREEN, ingresos);
     seccion('Egresos', EMBER, egresos);
 
+    // Espacio para firma al final del reporte.
+    if (y > 700) { pie(); doc.addPage(); y = 40; }
+    y += 40;
+    const anchoFirma = 220;
+    const xFirma = (doc.page.width - anchoFirma) / 2;
+    doc.moveTo(xFirma, y).lineTo(xFirma + anchoFirma, y).strokeColor('#000000').lineWidth(1).stroke();
+    y += 6;
+    doc.font('Helvetica').fontSize(9).fillColor('#000000').text('Firma', xFirma, y, { width: anchoFirma, align: 'center' });
+
+    pie();
     doc.end();
   } catch (err) {
     if (!res.headersSent) res.status(500).json({ error: 'No se pudo generar el PDF.' });

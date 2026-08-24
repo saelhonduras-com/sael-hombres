@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { useOutletContext } from 'react-router-dom';
 import api, { mensajeError } from '../../api';
 import {
   DEPARTAMENTOS_HONDURAS, MUNICIPIOS_POR_DEPARTAMENTO, ZONAS_FIHNEC,
@@ -74,12 +75,18 @@ function GrupoCheckbox({ opciones, seleccionadas, onChange, clases = 'sm:grid-co
 }
 
 export default function AdminSaelistas() {
+  const { refrescarResumen } = useOutletContext();
   const [vista, setVista] = useState('lista'); // 'lista' | 'detalle' | 'formulario'
   const [lista, setLista] = useState([]);
   const [cargando, setCargando] = useState(true);
   const [error, setError] = useState('');
   const [buscar, setBuscar] = useState('');
   const [zonaFiltro, setZonaFiltro] = useState('');
+  const [aviso, setAviso] = useState(''); // avisito breve que desaparece solo, sin bloquear la pantalla
+  function mostrarAviso(mensaje) {
+    setAviso(mensaje);
+    setTimeout(() => setAviso(''), 2000);
+  }
   const [aspiranteFiltro, setAspiranteFiltro] = useState('');
   const [descargando, setDescargando] = useState('');
 
@@ -136,10 +143,21 @@ export default function AdminSaelistas() {
         evento_id: eventoActual.id,
         registrado_presencial: valor,
       });
-      setAsistencia((prev) => prev.map((s) =>
-        s.saelista_id === saelistaId ? { ...s, registrado_presencial: valor } : s
-      ));
-      setTotalesAsistencia((prev) => ({ ...prev, total_registrados: prev.total_registrados + (valor ? 1 : -1) }));
+      setAsistencia((prev) => {
+        const actualizado = prev.map((s) =>
+          s.saelista_id === saelistaId ? { ...s, registrado_presencial: valor } : s
+        );
+        // Se cuenta la lista real después del cambio, en vez de sumar/restar 1
+        // a ciegas — así nunca se desincroniza aunque un clic se dispare dos
+        // veces o una petición tarde más que otra.
+        setTotalesAsistencia((t) => ({
+          ...t,
+          total_registrados: actualizado.filter((s) => s.registrado_presencial).length,
+        }));
+        return actualizado;
+      });
+      mostrarAviso(valor ? '✓ Asistencia marcada' : '✓ Asistencia quitada');
+      refrescarResumen(); // pone al día "Saelistas asistiendo" en el panel lateral, sin recargar la página
     } catch (err) {
       setError(mensajeError(err));
     }
@@ -344,7 +362,7 @@ export default function AdminSaelistas() {
             onClick={() => setVista('lista')}
             className={`rounded-full px-4 py-1.5 text-xs font-semibold ${vista === 'lista' ? 'bg-ink text-white' : 'border border-ink/20 text-ink/70 hover:bg-ink/5'}`}
           >
-            Catálogo
+            Servidores
           </button>
           <button
             onClick={() => setVista('asistencia')}
@@ -721,6 +739,12 @@ export default function AdminSaelistas() {
               </button>
             </div>
           </div>
+        </div>
+      )}
+
+      {aviso && (
+        <div className="fixed bottom-6 left-1/2 z-50 -translate-x-1/2 rounded-full bg-ink px-5 py-2.5 text-sm font-semibold text-white shadow-lg">
+          {aviso}
         </div>
       )}
     </div>

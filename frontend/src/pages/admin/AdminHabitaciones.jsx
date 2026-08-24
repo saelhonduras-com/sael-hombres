@@ -3,8 +3,8 @@ import { useOutletContext } from 'react-router-dom';
 import api, { mensajeError } from '../../api';
 
 const claseInput = 'w-full rounded-lg border border-ink/15 px-3 py-2 text-sm focus:border-ember focus:outline-none';
-const btnEditar = 'rounded-full bg-[#007334] px-3 py-1 text-xs font-semibold text-white hover:bg-[#005c29]';
-const btnEliminar = 'rounded-full bg-ember px-3 py-1 text-xs font-semibold text-white hover:bg-ember-light';
+const btnEditar = 'rounded-full bg-[#007334]/10 px-3 py-1 text-xs font-semibold text-[#007334] hover:bg-[#007334]/20';
+const btnEliminar = 'rounded-full bg-ember/10 px-3 py-1 text-xs font-semibold text-ember hover:bg-ember/20';
 
 const vacioHabitacion = { numero: '', capacidad: '', notas: '', modulo_id: '' };
 const vacioModulo = { nombre: '', precio_por_persona: '', notas: '' };
@@ -47,12 +47,14 @@ export default function AdminHabitaciones() {
   const [cargandoOcupantes, setCargandoOcupantes] = useState(false);
   const [mostrarAgregarOcupante, setMostrarAgregarOcupante] = useState(false);
   const [formOcupante, setFormOcupante] = useState(vacioOcupante);
+  const [precioHotelModulo, setPrecioHotelModulo] = useState(null); // precio real (eventos_costos) del módulo de la habitación actual
   const [busquedaOcupante, setBusquedaOcupante] = useState('');
   const [resultadosBusqueda, setResultadosBusqueda] = useState([]);
   const [buscandoOcupante, setBuscandoOcupante] = useState(false);
   const [guardandoOcupante, setGuardandoOcupante] = useState(false);
 
   const [confirmacion, setConfirmacion] = useState(null);
+  const [avisoAsignacion, setAvisoAsignacion] = useState(null); // string | null — mensaje del modal
   function pedirConfirmacion({ mensaje, textoConfirmar = 'Eliminar', onConfirmar }) {
     setConfirmacion({ mensaje, textoConfirmar, onConfirmar });
   }
@@ -198,12 +200,16 @@ export default function AdminHabitaciones() {
   // (apartar un cuarto para alguien antes de que llegue su depósito), no
   // un cambio estructural del catálogo.
   function abrirBloquear(h) {
-    setBloqueando({ habitacion: h, nombre: '', numero_transferencia: '' });
+    setBloqueando({ habitacion: h, nombre: '', numero_transferencia: '', es_reserva_seguridad: false });
   }
 
   async function confirmarBloqueo() {
-    if (!bloqueando.nombre.trim() || !bloqueando.numero_transferencia.trim()) {
-      setError('El nombre y el número de transferencia bancaria son obligatorios.');
+    if (!bloqueando.nombre.trim()) {
+      setError('El nombre es obligatorio.');
+      return;
+    }
+    if (!bloqueando.es_reserva_seguridad && !bloqueando.numero_transferencia.trim()) {
+      setError('El número de transferencia bancaria es obligatorio (o marca "Reservación de seguridad" si todavía no hay depósito).');
       return;
     }
     setGuardandoBloqueo(true);
@@ -212,7 +218,8 @@ export default function AdminHabitaciones() {
       await api.post(`/admin/habitaciones/${bloqueando.habitacion.id}/reservar`, {
         evento_id: eventoActual.id,
         nombre_reservado: bloqueando.nombre.trim(),
-        numero_transferencia: bloqueando.numero_transferencia.trim(),
+        numero_transferencia: bloqueando.es_reserva_seguridad ? '' : bloqueando.numero_transferencia.trim(),
+        es_reserva_seguridad: bloqueando.es_reserva_seguridad,
       });
       setBloqueando(null);
       cargarTodo();
@@ -262,11 +269,28 @@ export default function AdminHabitaciones() {
     cargarTodo(); // refresca nombres/estado en la tabla de fondo
   }
 
-  function abrirAgregarOcupante() {
-    setFormOcupante(vacioOcupante);
+  async function abrirAgregarOcupante() {
     setBusquedaOcupante('');
     setResultadosBusqueda([]);
     setMostrarAgregarOcupante(true);
+    // El monto ya no se escribe a mano — se auto-llena con el precio real
+    // configurado para este módulo en "Aquí se controla el ingreso por
+    // persona de las habitaciones" (Entradas & Salidas), no con el precio
+    // de referencia que se ve en Módulos.
+    try {
+      const { data } = await api.get(`/admin/eventos/${eventoActual.id}/costos`);
+      const costoModulo = data.find((c) => c.concepto === 'Hotel' && c.modulo_id === habitacionSeleccionada.modulo_id);
+      const precio = costoModulo ? Number(costoModulo.monto) : null;
+      setPrecioHotelModulo(precio);
+      // Si esta habitación viene de una reservación de seguridad, nunca
+      // hubo depósito por transferencia — el cobro real solo puede ser en
+      // efectivo, así que se preselecciona y ya no se deja cambiar.
+      const metodoForzado = habitacionSeleccionada.es_reserva_seguridad ? 'efectivo' : '';
+      setFormOcupante({ ...vacioOcupante, monto: precio !== null ? String(precio) : '', metodo_pago: metodoForzado });
+    } catch (err) {
+      setPrecioHotelModulo(null);
+      setFormOcupante(vacioOcupante);
+    }
   }
 
   async function buscarOcupante(e) {
@@ -305,9 +329,10 @@ export default function AdminHabitaciones() {
         observaciones: formOcupante.observaciones,
       });
       setMostrarAgregarOcupante(false);
-      recargarOcupantes();
+      await cargarTodo(); // refresca la lista de módulos/habitaciones antes de volver
+      setVista('lista');
     } catch (err) {
-      setError(mensajeError(err));
+      setAvisoAsignacion(mensajeError(err));
     } finally {
       setGuardandoOcupante(false);
     }
@@ -364,7 +389,7 @@ export default function AdminHabitaciones() {
               <button
                 onClick={() => abrirNuevaHabitacion(null)}
                 disabled={!modoEdicion}
-                className="rounded-full bg-ember px-5 py-2 text-sm font-semibold text-white hover:bg-ember-light disabled:cursor-not-allowed disabled:opacity-40"
+                className="rounded-full bg-ember/10 px-5 py-2 text-sm font-semibold text-ember hover:bg-ember/20 disabled:cursor-not-allowed disabled:opacity-40"
               >
                 + Nueva habitación
               </button>
@@ -448,7 +473,7 @@ export default function AdminHabitaciones() {
           </div>
           <div className="mt-6 flex justify-end gap-3">
             <button onClick={() => setVista('lista')} className="rounded-full border border-ink/20 px-5 py-2 text-sm font-semibold text-ink/70 hover:bg-ink/5">Cancelar</button>
-            <button onClick={guardarModulo} disabled={guardando} className="rounded-full bg-[#007334] px-5 py-2 text-sm font-semibold text-white hover:bg-[#005c29] disabled:opacity-50">
+            <button onClick={guardarModulo} disabled={guardando} className="rounded-full bg-[#007334]/10 px-5 py-2 text-sm font-semibold text-[#007334] hover:bg-[#007334]/20 disabled:opacity-50">
               {guardando ? 'Guardando…' : 'Guardar'}
             </button>
           </div>
@@ -481,7 +506,7 @@ export default function AdminHabitaciones() {
           </div>
           <div className="mt-6 flex justify-end gap-3">
             <button onClick={() => setVista('lista')} className="rounded-full border border-ink/20 px-5 py-2 text-sm font-semibold text-ink/70 hover:bg-ink/5">Cancelar</button>
-            <button onClick={guardarHabitacion} disabled={guardando} className="rounded-full bg-[#007334] px-5 py-2 text-sm font-semibold text-white hover:bg-[#005c29] disabled:opacity-50">
+            <button onClick={guardarHabitacion} disabled={guardando} className="rounded-full bg-[#007334]/10 px-5 py-2 text-sm font-semibold text-[#007334] hover:bg-[#007334]/20 disabled:opacity-50">
               {guardando ? 'Guardando…' : 'Guardar'}
             </button>
           </div>
@@ -495,7 +520,7 @@ export default function AdminHabitaciones() {
               <h2 className="font-display text-lg font-bold text-ink">Habitación {habitacionSeleccionada.numero}</h2>
               <p className="text-xs text-ink/50">Capacidad: {habitacionSeleccionada.capacidad} · Evento: {eventoActual.nombre}</p>
             </div>
-            <button onClick={() => setVista('lista')} className="rounded-full bg-night px-4 py-1.5 text-sm font-semibold text-white hover:opacity-90">Volver</button>
+            <button onClick={() => setVista('lista')} className="rounded-full bg-night/10 px-4 py-1.5 text-sm font-semibold text-night hover:bg-night/20">Volver</button>
           </div>
 
           {cargandoOcupantes ? <p className="mt-6 text-ink/40">Cargando…</p> : (
@@ -524,7 +549,7 @@ export default function AdminHabitaciones() {
 
           {!mostrarAgregarOcupante ? (
             ocupantes.length < habitacionSeleccionada.capacidad ? (
-              <button onClick={abrirAgregarOcupante} className="mt-4 rounded-full bg-ember px-5 py-2 text-sm font-semibold text-white hover:bg-ember-light">
+              <button onClick={abrirAgregarOcupante} className="mt-4 rounded-full bg-ember/10 px-5 py-2 text-sm font-semibold text-ember hover:bg-ember/20">
                 + Agregar ocupante
               </button>
             ) : (
@@ -554,7 +579,7 @@ export default function AdminHabitaciones() {
                       type="text" value={busquedaOcupante} onChange={(e) => setBusquedaOcupante(e.target.value)}
                       placeholder="Buscar por nombre o identificación" className={claseInput}
                     />
-                    <button type="submit" className="shrink-0 rounded-full bg-[#007334] px-4 py-2 text-xs font-semibold text-white hover:bg-[#005c29]">
+                    <button type="submit" className="shrink-0 rounded-full bg-[#007334]/10 px-4 py-2 text-xs font-semibold text-[#007334] hover:bg-[#007334]/20">
                       {buscandoOcupante ? '...' : 'Buscar'}
                     </button>
                   </form>
@@ -578,21 +603,52 @@ export default function AdminHabitaciones() {
                     <button onClick={() => setFormOcupante((f) => ({ ...f, seleccionado: null }))} className="text-xs text-ink/40 hover:text-ember hover:underline">Cambiar</button>
                   </div>
                   <label>
-                    <span className="mb-1 block text-xs font-semibold text-ink/60">Monto (opcional)</span>
-                    <input type="number" min="0" step="0.01" value={formOcupante.monto} onChange={(e) => setFormOcupante((f) => ({ ...f, monto: e.target.value }))} className={claseInput} />
+                    <span className="mb-1 block text-xs font-semibold text-ink/60">Monto</span>
+                    <input
+                      type="number" value={formOcupante.monto} disabled
+                      className={`${claseInput} disabled:border-transparent disabled:bg-ink/5 disabled:text-ink/50`}
+                    />
+                    <span className="mt-1 block text-[11px] text-ink/40">
+                      {precioHotelModulo !== null
+                        ? 'Se toma del precio configurado para este módulo en Entradas & Salidas.'
+                        : 'Este módulo no tiene precio configurado todavía en Entradas & Salidas — configúralo ahí antes de asignar.'}
+                    </span>
                   </label>
                   <label>
-                    <span className="mb-1 block text-xs font-semibold text-ink/60">Método de pago (opcional)</span>
-                    <select value={formOcupante.metodo_pago} onChange={(e) => setFormOcupante((f) => ({ ...f, metodo_pago: e.target.value }))} className={claseInput}>
+                    <span className="mb-1 block text-xs font-semibold text-ink/60">Método de pago</span>
+                    <select
+                      value={formOcupante.metodo_pago}
+                      disabled={habitacionSeleccionada.es_reserva_seguridad}
+                      onChange={(e) => {
+                        const nuevoMetodo = e.target.value;
+                        setFormOcupante((f) => ({
+                          ...f,
+                          metodo_pago: nuevoMetodo,
+                          // Efectivo no tiene banco ni # de recibo — se limpia
+                          // cualquier valor que hubiera quedado de antes.
+                          banco_o_recibo: nuevoMetodo === 'efectivo' ? '' : f.banco_o_recibo,
+                        }));
+                      }}
+                      className={`${claseInput} disabled:border-transparent disabled:bg-ink/5 disabled:text-ink/50`}
+                    >
                       <option value="">Seleccionar…</option>
                       <option value="efectivo">Efectivo</option>
-                      <option value="transferencia">Transferencia Bancaria</option>
-                      <option value="tarjeta">Tarjeta de Crédito/Débito</option>
+                      <option value="transferencia">Transferencia Bancaria (Bancos)</option>
                     </select>
+                    {habitacionSeleccionada.es_reserva_seguridad && (
+                      <span className="mt-1 block text-[11px] text-ink/40">
+                        Esta habitación estaba en reservación de seguridad (sin depósito) — el cobro real solo puede ser en efectivo.
+                      </span>
+                    )}
                   </label>
                   <label>
                     <span className="mb-1 block text-xs font-semibold text-ink/60">Banco o # de recibo (opcional)</span>
-                    <input type="text" value={formOcupante.banco_o_recibo} onChange={(e) => setFormOcupante((f) => ({ ...f, banco_o_recibo: e.target.value }))} className={claseInput} />
+                    <input
+                      type="text" value={formOcupante.banco_o_recibo}
+                      onChange={(e) => setFormOcupante((f) => ({ ...f, banco_o_recibo: e.target.value }))}
+                      disabled={formOcupante.metodo_pago === 'efectivo'}
+                      className={`${claseInput} disabled:border-transparent disabled:bg-ink/5 disabled:text-ink/50`}
+                    />
                   </label>
                   <label>
                     <span className="mb-1 block text-xs font-semibold text-ink/60">Observaciones (opcional)</span>
@@ -603,7 +659,7 @@ export default function AdminHabitaciones() {
 
               <div className="mt-4 flex justify-end gap-3">
                 <button onClick={() => setMostrarAgregarOcupante(false)} className="rounded-full border border-ink/20 px-4 py-1.5 text-xs font-semibold text-ink/70 hover:bg-ink/5">Cancelar</button>
-                <button onClick={guardarOcupante} disabled={guardandoOcupante || !formOcupante.seleccionado} className="rounded-full bg-[#007334] px-4 py-1.5 text-xs font-semibold text-white hover:bg-[#005c29] disabled:opacity-50">
+                <button onClick={guardarOcupante} disabled={guardandoOcupante || !formOcupante.seleccionado} className="rounded-full bg-[#007334]/10 px-4 py-1.5 text-xs font-semibold text-[#007334] hover:bg-[#007334]/20 disabled:opacity-50">
                   {guardandoOcupante ? 'Guardando…' : 'Asignar'}
                 </button>
               </div>
@@ -624,7 +680,7 @@ export default function AdminHabitaciones() {
               <button onClick={() => setConfirmacion(null)} className="rounded-full border border-ink/20 px-4 py-1.5 text-sm font-semibold text-ink/70 hover:bg-ink/5">Cancelar</button>
               <button
                 onClick={() => { const accion = confirmacion.onConfirmar; setConfirmacion(null); accion(); }}
-                className="rounded-full bg-ember px-4 py-1.5 text-sm font-semibold text-white hover:bg-ember-light"
+                className="rounded-full border border-ember/30 bg-ember/10 px-4 py-1.5 text-sm font-semibold text-ember hover:bg-ember/20"
               >
                 {confirmacion.textoConfirmar}
               </button>
@@ -645,6 +701,18 @@ export default function AdminHabitaciones() {
               sistema). El monto se toma automático del precio de Hotel ya configurado para este módulo — no se
               escribe a mano.
             </p>
+            <label className="mt-4 flex items-start gap-2 rounded-lg bg-ink/5 p-3">
+              <input
+                type="checkbox" checked={bloqueando.es_reserva_seguridad}
+                onChange={(e) => setBloqueando((b) => ({ ...b, es_reserva_seguridad: e.target.checked }))}
+                className="mt-0.5"
+              />
+              <span className="text-xs text-ink/70">
+                <span className="font-semibold">Reservación de seguridad</span> — para mantener la habitación
+                disponible sí o sí, sin depósito todavía. No pide número de transferencia, y no se cuenta en
+                Control de Ingresos hasta que se asigne a alguien real.
+              </span>
+            </label>
             <label className="mt-4 block">
               <span className="mb-1 block text-xs font-semibold text-ink/60">Nombre</span>
               <input
@@ -654,25 +722,45 @@ export default function AdminHabitaciones() {
                 placeholder="A nombre de quién queda apartada"
               />
             </label>
-            <label className="mt-4 block">
-              <span className="mb-1 block text-xs font-semibold text-ink/60">Número de Transferencia Bancaria</span>
-              <input
-                type="text" value={bloqueando.numero_transferencia}
-                onChange={(e) => setBloqueando((b) => ({ ...b, numero_transferencia: e.target.value }))}
-                className={claseInput}
-                placeholder="Comprobante del depósito"
-              />
-            </label>
+            {!bloqueando.es_reserva_seguridad && (
+              <label className="mt-4 block">
+                <span className="mb-1 block text-xs font-semibold text-ink/60">Número de Transferencia Bancaria</span>
+                <input
+                  type="text" value={bloqueando.numero_transferencia}
+                  onChange={(e) => setBloqueando((b) => ({ ...b, numero_transferencia: e.target.value }))}
+                  className={claseInput}
+                  placeholder="Comprobante del depósito"
+                />
+              </label>
+            )}
             <div className="mt-6 flex justify-end gap-3">
               <button onClick={() => setBloqueando(null)} className="rounded-full border border-ink/20 px-4 py-1.5 text-sm font-semibold text-ink/70 hover:bg-ink/5">Cancelar</button>
               <button
                 onClick={confirmarBloqueo}
                 disabled={guardandoBloqueo}
-                className="rounded-full bg-night px-4 py-1.5 text-sm font-semibold text-white hover:opacity-90 disabled:opacity-50"
+                className="rounded-full bg-night/10 px-4 py-1.5 text-sm font-semibold text-night hover:bg-night/20 disabled:opacity-50"
               >
                 {guardandoBloqueo ? 'Bloqueando…' : 'Bloquear'}
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {avisoAsignacion && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink/40 px-4">
+          <div className="w-full max-w-sm rounded-2xl bg-white p-6 shadow-lg">
+            <div className="flex items-center gap-3">
+              <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-ember/10 text-xl">🚫</span>
+              <h3 className="font-display text-lg font-bold text-ink">No se pudo asignar</h3>
+            </div>
+            <p className="mt-3 text-sm text-ink/60">{avisoAsignacion}</p>
+            <button
+              onClick={() => setAvisoAsignacion(null)}
+              className="mt-6 w-full rounded-full border border-ink/20 px-4 py-2 text-sm font-semibold text-ink/70 hover:bg-ink/5"
+            >
+              Entendido
+            </button>
           </div>
         </div>
       )}
@@ -732,7 +820,9 @@ function TablaModulo({
                   <td className="px-4 py-3">
                     {bloqueada ? (
                       <button onClick={() => onVerHabitacion(h)} className="text-left text-sm text-ink/50 italic hover:underline">
-                        🔒 {h.nombre_reservado} · Ref. {h.numero_transferencia}{h.reserva_monto ? ` · L. ${h.reserva_monto}` : ''}
+                        {h.es_reserva_seguridad
+                          ? `🔒 ${h.nombre_reservado} · Reservación de seguridad (sin depósito)`
+                          : `🔒 ${h.nombre_reservado} · Ref. ${h.numero_transferencia}${h.reserva_monto ? ` · L. ${h.reserva_monto}` : ''}`}
                       </button>
                     ) : h.ocupantes === 0 ? (
                       <button onClick={() => onVerHabitacion(h)} className="text-sm font-semibold text-ember hover:underline">
@@ -747,7 +837,7 @@ function TablaModulo({
                   </td>
                   <td className="px-4 py-3">
                     <span className={`rounded-full px-3 py-1 text-xs font-semibold uppercase tracking-wide ${
-                      h.estado === 'DISPONIBLE' ? 'bg-[#007334] text-white' : h.estado === 'BLOQUEADA' ? 'bg-night text-white' : 'bg-ember text-white'
+                      h.estado === 'DISPONIBLE' ? 'bg-[#007334]/10 text-[#007334]' : h.estado === 'BLOQUEADA' ? 'bg-night/10 text-night' : 'bg-ember/10 text-ember'
                     }`}>
                       {h.estado}
                     </span>
@@ -758,7 +848,7 @@ function TablaModulo({
                         Desbloquear
                       </button>
                     ) : (
-                      <button onClick={() => onBloquear(h)} className="rounded-full bg-night px-3 py-1 text-xs font-semibold text-white hover:opacity-90">
+                      <button onClick={() => onBloquear(h)} className="rounded-full bg-night/10 px-3 py-1 text-xs font-semibold text-night hover:bg-night/20">
                         Bloquear
                       </button>
                     )}

@@ -33,6 +33,7 @@ const GRUPOS_MENU = [
     soloSuperAdmin: true,
     items: [
       { ruta: '/admin/usuarios', etiqueta: 'Usuarios', modulo: null, icono: '🔑' },
+      { ruta: '/admin/mantenimiento', etiqueta: 'Mantenimiento', modulo: null, icono: '🛠️' },
     ],
   },
 ];
