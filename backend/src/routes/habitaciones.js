@@ -83,7 +83,9 @@ router.get('/admin/habitaciones', requireAuth, requireModulo('habitaciones', 'co
               m.nombre AS modulo_nombre, m.precio_por_persona AS modulo_precio,
               COALESCE(o.total_ocupantes, 0) AS ocupantes,
               COALESCE(o.ocupantes_json, '[]'::json) AS ocupantes_detalle,
-              r.nombre_reservado, r.numero_transferencia, r.monto AS reserva_monto, r.es_reserva_seguridad
+              r.nombre_reservado, r.numero_transferencia, r.monto AS reserva_monto,
+              r.metodo_pago AS reserva_metodo_pago, r.observaciones AS reserva_observaciones,
+              r.es_reserva_seguridad
        FROM habitaciones h
        LEFT JOIN modulos m ON m.id = h.modulo_id
        LEFT JOIN (
@@ -105,16 +107,24 @@ router.get('/admin/habitaciones', requireAuth, requireModulo('habitaciones', 'co
                 CASE WHEN h.numero ~ '^[0-9]+$' THEN LPAD(h.numero, 10, '0') ELSE h.numero END ASC`,
       [evento_id || null]
     );
+    // Cuatro estados posibles, ya sin "parcial" — la capacidad es solo
+    // informativa, no se fuerza a llenarla:
+    //   OCUPADA    — tiene al menos un ocupante real asignado (roster)
+    //   SEGURIDAD  — apartada sin depósito todavía (es_reserva_seguridad)
+    //   BLOQUEADA  — apartada con depósito/transferencia ya capturado
+    //   DISPONIBLE — nada de lo anterior
+    // "sin_cobro" marca una habitación OCUPADA que todavía no tiene fila
+    // de cobro en habitacion_reservas (reserva_monto NULL) — la persona
+    // titular ya está en el roster pero el pago no se guardó todavía.
     const conEstado = rows.map((r) => {
       const ocupantes = parseInt(r.ocupantes, 10);
-      let estado = ocupantes === 0 ? 'DISPONIBLE' : 'NO DISPONIBLE';
-      // La reserva (bloqueo manual) tiene prioridad visual sobre lo demás —
-      // aunque la habitación ya tenga algún ocupante, si sigue bloqueada
-      // se muestra como BLOQUEADA para que quede claro que hay un acuerdo
-      // especial ahí (ej. reservada para alguien más que todavía falta
-      // por asignar).
-      if (r.nombre_reservado) estado = 'BLOQUEADA';
-      return { ...r, ocupantes, estado };
+      let estado = 'DISPONIBLE';
+      if (ocupantes > 0) estado = 'OCUPADA';
+      else if (r.es_reserva_seguridad) estado = 'SEGURIDAD';
+      else if (r.nombre_reservado) estado = 'BLOQUEADA';
+      const sinCobro = ocupantes > 0 && (r.reserva_monto === null || r.reserva_monto === undefined);
+      const titular = r.ocupantes_detalle && r.ocupantes_detalle.length > 0 ? r.ocupantes_detalle[0].nombre : null;
+      return { ...r, ocupantes, estado, sin_cobro: sinCobro, titular };
     });
     res.json(conEstado);
   } catch (err) {
@@ -186,8 +196,9 @@ router.delete('/admin/habitaciones/:id', requireAuth, requireModulo('habitacione
 // ============================================================
 
 // Admin: lista los ocupantes de una habitación específica, en un evento
-// específico, con todo el detalle (monto, banco, observaciones) — usada
-// por la pantalla de gestión, no por la tabla resumen de arriba.
+// específico — usada por la pantalla de gestión. Ya no trae monto ni
+// método de pago por persona: ese dato ahora vive una sola vez por
+// habitación en habitacion_reservas (ver GET /admin/habitaciones).
 router.get('/admin/habitaciones/:id/ocupantes', requireAuth, requireModulo('habitaciones', 'consulta'), async (req, res) => {
   const { id } = req.params;
   const { evento_id } = req.query;
@@ -196,7 +207,7 @@ router.get('/admin/habitaciones/:id/ocupantes', requireAuth, requireModulo('habi
   }
   try {
     const { rows } = await pool.query(
-      `SELECT o.id, o.tipo_ocupante, o.monto, o.metodo_pago, o.banco_o_recibo, o.observaciones,
+      `SELECT o.id, o.tipo_ocupante,
               COALESCE(p.nombre_completo, s.nombre_completo) AS nombre_completo,
               COALESCE(p.capitulo, s.capitulo) AS capitulo,
               COALESCE(p.telefono_movil, s.celular) AS telefono
@@ -207,21 +218,45 @@ router.get('/admin/habitaciones/:id/ocupantes', requireAuth, requireModulo('habi
        ORDER BY o.creado_en ASC`,
       [id, evento_id]
     );
-    res.json(rows);
+    // El primero por fecha de creación es el titular — es el mismo orden
+    // que ya usaba GET /admin/habitaciones para "ocupantes_detalle".
+    const conTitular = rows.map((r, i) => ({ ...r, es_titular: i === 0 }));
+    res.json(conTitular);
   } catch (err) {
     res.status(500).json({ error: 'No se pudo obtener los ocupantes de la habitación.' });
   }
 });
 
-// Admin: asigna un nuevo ocupante a una habitación, en un evento
-// específico. Valida que no se pase de la capacidad de la habitación.
-router.post('/admin/habitaciones/:id/ocupantes', requireAuth, requireModulo('habitaciones', 'edicion'), async (req, res) => {
-  const { id } = req.params;
-  const { evento_id, tipo_ocupante, participante_id, saelista_id, monto, metodo_pago, banco_o_recibo, observaciones } = req.body;
-
-  if (!evento_id) {
-    return res.status(400).json({ error: 'Falta indicar el evento.' });
+// Valida método de pago y, si es "transferencia", exige que la
+// habitación no venga de una reserva de seguridad (nunca hubo depósito
+// real, así que el cobro en ese caso solo puede ser en efectivo).
+async function validarMetodoPago(id, metodo_pago) {
+  if (!['efectivo', 'transferencia'].includes(metodo_pago)) {
+    return 'El método de pago debe ser "efectivo" o "transferencia".';
   }
+  if (metodo_pago === 'transferencia') {
+    const reserva = await pool.query(
+      `SELECT es_reserva_seguridad FROM habitacion_reservas WHERE habitacion_id = $1`,
+      [id]
+    );
+    if (reserva.rows.length > 0 && reserva.rows[0].es_reserva_seguridad) {
+      return 'Esta habitación viene de una reserva de seguridad, nunca hubo depósito — el cobro debe ser en efectivo.';
+    }
+  }
+  return null;
+}
+
+// Admin: asigna al TITULAR de una habitación — en una sola operación
+// crea el roster (habitacion_ocupantes) y el cobro de la habitación
+// completa (habitacion_reservas), con el monto tomado automáticamente
+// del precio de Hotel configurado para el módulo. Solo se usa cuando la
+// habitación todavía no tiene ningún ocupante — para agregar ocupantes
+// adicionales sin costo extra, usar POST .../ocupantes-adicionales.
+router.post('/admin/habitaciones/:id/titular', requireAuth, requireModulo('habitaciones', 'edicion'), async (req, res) => {
+  const { id } = req.params;
+  const { evento_id, tipo_ocupante, participante_id, saelista_id, nombre_titular, metodo_pago, numero_transferencia, observaciones } = req.body;
+
+  if (!evento_id) return res.status(400).json({ error: 'Falta indicar el evento.' });
   if (tipo_ocupante !== 'participante' && tipo_ocupante !== 'saelista') {
     return res.status(400).json({ error: 'El tipo de ocupante debe ser "participante" o "saelista".' });
   }
@@ -231,8 +266,109 @@ router.post('/admin/habitaciones/:id/ocupantes', requireAuth, requireModulo('hab
   if (tipo_ocupante === 'saelista' && !saelista_id) {
     return res.status(400).json({ error: 'Debes seleccionar un saelista.' });
   }
-  if (metodo_pago && !['tarjeta', 'efectivo', 'transferencia'].includes(metodo_pago)) {
-    return res.status(400).json({ error: 'El método de pago debe ser "tarjeta", "efectivo" o "transferencia".' });
+  const errorMetodo = await validarMetodoPago(id, metodo_pago).catch(() => null);
+  if (errorMetodo) return res.status(400).json({ error: errorMetodo });
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    const habitacion = await client.query(`SELECT capacidad, modulo_id FROM habitaciones WHERE id = $1`, [id]);
+    if (habitacion.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'La habitación no existe.' });
+    }
+    const { capacidad, modulo_id: moduloId } = habitacion.rows[0];
+    if (!moduloId) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ error: 'Esta habitación no tiene un módulo asignado — asígnale uno primero en Habitaciones.' });
+    }
+
+    const actuales = await client.query(
+      `SELECT COUNT(*) FROM habitacion_ocupantes WHERE habitacion_id = $1 AND evento_id = $2`,
+      [id, evento_id]
+    );
+    if (parseInt(actuales.rows[0].count, 10) > 0) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ error: 'Esta habitación ya tiene un titular asignado — usa "Agregar otro ocupante" en vez de esto.' });
+    }
+    if (parseInt(actuales.rows[0].count, 10) >= capacidad) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ error: 'Esta habitación ya alcanzó su capacidad máxima para este evento.' });
+    }
+
+    const columnaPersona = tipo_ocupante === 'participante' ? 'participante_id' : 'saelista_id';
+    const idPersona = tipo_ocupante === 'participante' ? participante_id : saelista_id;
+    const yaAsignado = await client.query(
+      `SELECT h.numero
+       FROM habitacion_ocupantes ho
+       JOIN habitaciones h ON h.id = ho.habitacion_id
+       WHERE ho.evento_id = $1 AND ho.${columnaPersona} = $2
+       LIMIT 1`,
+      [evento_id, idPersona]
+    );
+    if (yaAsignado.rows.length > 0) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({
+        error: `Esta persona ya está asignada a la Habitación ${yaAsignado.rows[0].numero} en este evento. Quítala de ahí primero si necesitas moverla.`,
+      });
+    }
+
+    const precio = await client.query(
+      `SELECT monto FROM eventos_costos WHERE evento_id = $1 AND modulo_id = $2 AND concepto = 'Hotel'`,
+      [evento_id, moduloId]
+    );
+    if (precio.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ error: 'Este módulo todavía no tiene un precio de Hotel configurado — configúralo primero en Entradas de Efectivo.' });
+    }
+
+    await client.query(
+      `INSERT INTO habitacion_ocupantes (habitacion_id, evento_id, tipo_ocupante, participante_id, saelista_id)
+       VALUES ($1,$2,$3,$4,$5)`,
+      [id, evento_id, tipo_ocupante, tipo_ocupante === 'participante' ? participante_id : null, tipo_ocupante === 'saelista' ? saelista_id : null]
+    );
+
+    await client.query(
+      `INSERT INTO habitacion_reservas (habitacion_id, evento_id, nombre_reservado, numero_transferencia, monto, metodo_pago, observaciones, es_reserva_seguridad)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, false)
+       ON CONFLICT (habitacion_id, evento_id) DO UPDATE SET
+         nombre_reservado = EXCLUDED.nombre_reservado,
+         numero_transferencia = EXCLUDED.numero_transferencia,
+         monto = EXCLUDED.monto,
+         metodo_pago = EXCLUDED.metodo_pago,
+         observaciones = EXCLUDED.observaciones,
+         es_reserva_seguridad = false`,
+      [id, evento_id, nombre_titular || null, metodo_pago === 'transferencia' ? (numero_transferencia || null) : null, precio.rows[0].monto, metodo_pago, observaciones || null]
+    );
+
+    await client.query('COMMIT');
+    res.status(201).json({ ok: true, monto: precio.rows[0].monto });
+  } catch (err) {
+    await client.query('ROLLBACK');
+    console.error('Error al asignar titular:', err);
+    res.status(500).json({ error: 'No se pudo asignar el titular de la habitación.' });
+  } finally {
+    client.release();
+  }
+});
+
+// Admin: agrega un ocupante ADICIONAL a una habitación que ya tiene
+// titular — solo roster, sin costo extra (el cobro ya quedó fijado por
+// habitación al asignar el titular).
+router.post('/admin/habitaciones/:id/ocupantes-adicionales', requireAuth, requireModulo('habitaciones', 'edicion'), async (req, res) => {
+  const { id } = req.params;
+  const { evento_id, tipo_ocupante, participante_id, saelista_id } = req.body;
+
+  if (!evento_id) return res.status(400).json({ error: 'Falta indicar el evento.' });
+  if (tipo_ocupante !== 'participante' && tipo_ocupante !== 'saelista') {
+    return res.status(400).json({ error: 'El tipo de ocupante debe ser "participante" o "saelista".' });
+  }
+  if (tipo_ocupante === 'participante' && !participante_id) {
+    return res.status(400).json({ error: 'Debes seleccionar un participante.' });
+  }
+  if (tipo_ocupante === 'saelista' && !saelista_id) {
+    return res.status(400).json({ error: 'Debes seleccionar un saelista.' });
   }
 
   try {
@@ -241,8 +377,6 @@ router.post('/admin/habitaciones/:id/ocupantes', requireAuth, requireModulo('hab
       return res.status(404).json({ error: 'La habitación no existe.' });
     }
 
-    // Nadie puede quedar asignado a dos habitaciones a la vez en el mismo
-    // evento — sin importar si es la misma habitación o una distinta.
     const columnaPersona = tipo_ocupante === 'participante' ? 'participante_id' : 'saelista_id';
     const idPersona = tipo_ocupante === 'participante' ? participante_id : saelista_id;
     const yaAsignado = await pool.query(
@@ -263,22 +397,17 @@ router.post('/admin/habitaciones/:id/ocupantes', requireAuth, requireModulo('hab
       `SELECT COUNT(*) FROM habitacion_ocupantes WHERE habitacion_id = $1 AND evento_id = $2`,
       [id, evento_id]
     );
+    if (parseInt(actuales.rows[0].count, 10) === 0) {
+      return res.status(400).json({ error: 'Esta habitación todavía no tiene titular — asígnalo primero.' });
+    }
     if (parseInt(actuales.rows[0].count, 10) >= habitacion.rows[0].capacidad) {
       return res.status(400).json({ error: 'Esta habitación ya alcanzó su capacidad máxima para este evento.' });
     }
 
     const { rows } = await pool.query(
-      `INSERT INTO habitacion_ocupantes (
-        habitacion_id, evento_id, tipo_ocupante, participante_id, saelista_id,
-        monto, metodo_pago, banco_o_recibo, observaciones
-      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
-      RETURNING id`,
-      [
-        id, evento_id, tipo_ocupante,
-        tipo_ocupante === 'participante' ? participante_id : null,
-        tipo_ocupante === 'saelista' ? saelista_id : null,
-        monto || null, metodo_pago || null, banco_o_recibo || null, observaciones || null,
-      ]
+      `INSERT INTO habitacion_ocupantes (habitacion_id, evento_id, tipo_ocupante, participante_id, saelista_id)
+       VALUES ($1,$2,$3,$4,$5) RETURNING id`,
+      [id, evento_id, tipo_ocupante, tipo_ocupante === 'participante' ? participante_id : null, tipo_ocupante === 'saelista' ? saelista_id : null]
     );
     res.status(201).json({ id: rows[0].id });
   } catch (err) {
@@ -286,40 +415,65 @@ router.post('/admin/habitaciones/:id/ocupantes', requireAuth, requireModulo('hab
   }
 });
 
-// Admin: edita los datos de una asignación (monto, método de pago, banco/recibo, observaciones)
-router.put('/admin/habitacion-ocupantes/:ocupanteId', requireAuth, requireModulo('habitaciones', 'edicion'), async (req, res) => {
-  const { ocupanteId } = req.params;
-  const { monto, metodo_pago, banco_o_recibo, observaciones } = req.body;
-  if (metodo_pago && !['tarjeta', 'efectivo', 'transferencia'].includes(metodo_pago)) {
-    return res.status(400).json({ error: 'El método de pago debe ser "tarjeta", "efectivo" o "transferencia".' });
-  }
+// Admin: edita el cobro de una habitación ya asignada (método de pago,
+// observaciones) sin tocar el roster de ocupantes.
+router.put('/admin/habitaciones/:id/cobro', requireAuth, requireModulo('habitaciones', 'edicion'), async (req, res) => {
+  const { id } = req.params;
+  const { evento_id, metodo_pago, numero_transferencia, observaciones } = req.body;
+  if (!evento_id) return res.status(400).json({ error: 'Falta indicar el evento.' });
+  const errorMetodo = await validarMetodoPago(id, metodo_pago).catch(() => null);
+  if (errorMetodo) return res.status(400).json({ error: errorMetodo });
   try {
     const { rows } = await pool.query(
-      `UPDATE habitacion_ocupantes SET monto = $1, metodo_pago = $2, banco_o_recibo = $3, observaciones = $4
-       WHERE id = $5 RETURNING id`,
-      [monto || null, metodo_pago || null, banco_o_recibo || null, observaciones || null, ocupanteId]
+      `UPDATE habitacion_reservas SET metodo_pago = $1, numero_transferencia = $2, observaciones = $3
+       WHERE habitacion_id = $4 AND evento_id = $5 RETURNING id`,
+      [metodo_pago, metodo_pago === 'transferencia' ? (numero_transferencia || null) : null, observaciones || null, id, evento_id]
     );
     if (rows.length === 0) {
-      return res.status(404).json({ error: 'Asignación no encontrada.' });
+      return res.status(404).json({ error: 'Esta habitación todavía no tiene un cobro registrado.' });
     }
     res.json({ ok: true });
   } catch (err) {
-    res.status(500).json({ error: 'No se pudo actualizar la asignación.' });
+    res.status(500).json({ error: 'No se pudo actualizar el cobro de la habitación.' });
   }
 });
 
 // Admin: quita a alguien de una habitación (deshace la asignación,
-// libera el espacio para este evento — no afecta eventos anteriores)
+// libera el espacio para este evento — no afecta eventos anteriores).
+// Si era el último ocupante, también se borra el cobro de la
+// habitación (habitacion_reservas) para que vuelva a quedar DISPONIBLE
+// de verdad, en vez de dejar un monto huérfano sin nadie ahí.
 router.delete('/admin/habitacion-ocupantes/:ocupanteId', requireAuth, requireModulo('habitaciones', 'edicion'), async (req, res) => {
   const { ocupanteId } = req.params;
+  const client = await pool.connect();
   try {
-    const { rows } = await pool.query(`DELETE FROM habitacion_ocupantes WHERE id = $1 RETURNING id`, [ocupanteId]);
+    await client.query('BEGIN');
+    const { rows } = await client.query(
+      `DELETE FROM habitacion_ocupantes WHERE id = $1 RETURNING habitacion_id, evento_id`,
+      [ocupanteId]
+    );
     if (rows.length === 0) {
+      await client.query('ROLLBACK');
       return res.status(404).json({ error: 'Asignación no encontrada.' });
     }
+    const { habitacion_id, evento_id } = rows[0];
+    const restantes = await client.query(
+      `SELECT COUNT(*) FROM habitacion_ocupantes WHERE habitacion_id = $1 AND evento_id = $2`,
+      [habitacion_id, evento_id]
+    );
+    if (parseInt(restantes.rows[0].count, 10) === 0) {
+      await client.query(
+        `DELETE FROM habitacion_reservas WHERE habitacion_id = $1 AND evento_id = $2 AND es_reserva_seguridad = false`,
+        [habitacion_id, evento_id]
+      );
+    }
+    await client.query('COMMIT');
     res.json({ ok: true });
   } catch (err) {
+    await client.query('ROLLBACK');
     res.status(500).json({ error: 'No se pudo quitar al ocupante.' });
+  } finally {
+    client.release();
   }
 });
 
@@ -337,7 +491,7 @@ router.delete('/admin/habitacion-ocupantes/:ocupanteId', requireAuth, requireMod
 // persona llegue.
 router.post('/admin/habitaciones/:id/reservar', requireAuth, requireModulo('habitaciones', 'edicion'), async (req, res) => {
   const { id } = req.params;
-  const { evento_id, nombre_reservado, numero_transferencia, es_reserva_seguridad } = req.body;
+  const { evento_id, nombre_reservado, numero_transferencia, es_reserva_seguridad, observaciones } = req.body;
   // Reserva de seguridad: solo apartar el cupo, sin depósito real todavía —
   // no pide número de transferencia, y no debe sumar a Control de Ingresos.
   if (es_reserva_seguridad) {
@@ -374,15 +528,22 @@ router.post('/admin/habitaciones/:id/reservar', requireAuth, requireModulo('habi
       monto = precio.rows[0].monto;
     }
 
+    // Una reserva de seguridad no implica ningún pago todavía (metodo_pago
+    // queda NULL); una reserva normal siempre trae número de transferencia,
+    // así que su método de pago es 'transferencia' por definición.
+    const metodoPago = es_reserva_seguridad ? null : 'transferencia';
+
     await pool.query(
-      `INSERT INTO habitacion_reservas (habitacion_id, evento_id, nombre_reservado, numero_transferencia, monto, es_reserva_seguridad)
-       VALUES ($1, $2, $3, $4, $5, $6)
+      `INSERT INTO habitacion_reservas (habitacion_id, evento_id, nombre_reservado, numero_transferencia, monto, metodo_pago, observaciones, es_reserva_seguridad)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
        ON CONFLICT (habitacion_id, evento_id) DO UPDATE SET
          nombre_reservado = EXCLUDED.nombre_reservado,
          numero_transferencia = EXCLUDED.numero_transferencia,
          monto = EXCLUDED.monto,
+         metodo_pago = EXCLUDED.metodo_pago,
+         observaciones = EXCLUDED.observaciones,
          es_reserva_seguridad = EXCLUDED.es_reserva_seguridad`,
-      [id, evento_id, nombre_reservado, numero_transferencia || null, monto, !!es_reserva_seguridad]
+      [id, evento_id, nombre_reservado, numero_transferencia || null, monto, metodoPago, observaciones || null, !!es_reserva_seguridad]
     );
     res.status(201).json({ ok: true, monto });
   } catch (err) {

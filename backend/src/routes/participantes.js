@@ -18,7 +18,6 @@ function validarTelefono(tel) {
 function validarPasaporte(valor) {
   return /^[A-Za-z0-9]{5,20}$/.test(valor);
 }
-
 // Límite razonable de "veces que ha recibido SAELES antes de este sistema".
 // 0 a 99 — nadie ha ido cientos de veces, y evita que un número gigantesco
 // (ej. 13 dígitos por error de captura) tumbe la inserción en la base de
@@ -68,14 +67,39 @@ router.get('/participantes/dni/:dni', async (req, res) => {
   }
 });
 
+// Público: mismo propósito que la ruta de arriba, pero para extranjeros
+// que se inscriben con número de pasaporte en vez de DNI hondureño.
+router.get('/participantes/pasaporte/:pasaporte', async (req, res) => {
+  const { pasaporte } = req.params;
+  if (!validarPasaporte(pasaporte)) {
+    return res.status(400).json({ error: 'El número de pasaporte debe ser alfanumérico (5 a 20 caracteres).' });
+  }
+  try {
+    const { rows } = await pool.query(
+      `SELECT id, nombre_completo, fecha_nacimiento, telefono_movil,
+              departamento, municipio, capitulo, zona, cargo_fihnec, estado_civil,
+              contacto_emergencia_nombre, contacto_emergencia_telefono
+       FROM participantes WHERE numero_identificacion = $1`,
+      [pasaporte.trim().toUpperCase()]
+    );
+    if (rows.length === 0) {
+      return res.json({ existe: false });
+    }
+    res.json({ existe: true, participante: rows[0] });
+  } catch (err) {
+    res.status(500).json({ error: 'No se pudo verificar el pasaporte.' });
+  }
+});
+
 // Público: actualiza los datos de un participante ya existente cuando se
 // vuelve a inscribir (teléfono, ubicación, cargo, etc.) — excluye a propósito
 // ha_recibido_saeles/veces_saeles_previas, porque ese historial ya vive en el
 // sistema y no debe volver a preguntarse.
-// Seguridad: como el wizard público no tiene login, se exige el DNI en el
-// cuerpo de la petición y se verifica que coincida con el registrado para
-// ese id — mismo patrón de "conocer el DNI correcto = prueba de identidad"
-// que ya usa el resto de este flujo público.
+// Seguridad: como el wizard público no tiene login, se exige el DNI (o
+// pasaporte, si es extranjero) en el cuerpo de la petición y se verifica
+// que coincida con el registrado para ese id — mismo patrón de "conocer
+// la identificación correcta = prueba de identidad" que ya usa el resto
+// de este flujo público.
 router.put('/participantes/:id', async (req, res) => {
   const { id } = req.params;
   const {
@@ -84,8 +108,8 @@ router.put('/participantes/:id', async (req, res) => {
     contacto_emergencia_nombre, contacto_emergencia_telefono,
   } = req.body;
 
-  if (!validarDni(numero_identificacion)) {
-    return res.status(400).json({ error: 'DNI inválido.' });
+  if (!numero_identificacion) {
+    return res.status(400).json({ error: 'Falta el número de identificación.' });
   }
   if (!nombre_completo || !fecha_nacimiento || !telefono_movil || !departamento || !municipio || !zona || !cargo_fihnec || !estado_civil) {
     return res.status(400).json({ error: 'Faltan campos obligatorios.' });
@@ -101,12 +125,20 @@ router.put('/participantes/:id', async (req, res) => {
   }
 
   try {
-    const actual = await pool.query(`SELECT numero_identificacion FROM participantes WHERE id = $1`, [id]);
+    const actual = await pool.query(`SELECT numero_identificacion, tipo_identificacion FROM participantes WHERE id = $1`, [id]);
     if (actual.rows.length === 0) {
       return res.status(404).json({ error: 'Participante no encontrado.' });
     }
+    // La validación de formato depende de con QUÉ está registrado hoy este
+    // participante — no de lo que venga en el body — para que no se pueda
+    // colar un pasaporte con formato de DNI (o viceversa) en una edición.
+    const esPasaporte = actual.rows[0].tipo_identificacion === 'Pasaporte';
+    const formatoValido = esPasaporte ? validarPasaporte(numero_identificacion.trim()) : validarDni(numero_identificacion);
+    if (!formatoValido) {
+      return res.status(400).json({ error: esPasaporte ? 'El número de pasaporte debe ser alfanumérico (5 a 20 caracteres).' : 'El DNI debe tener 13 dígitos.' });
+    }
     if (actual.rows[0].numero_identificacion !== numero_identificacion) {
-      return res.status(403).json({ error: 'El DNI no coincide con este registro.' });
+      return res.status(403).json({ error: 'La identificación no coincide con este registro.' });
     }
 
     const { rows } = await pool.query(
@@ -131,16 +163,23 @@ router.put('/participantes/:id', async (req, res) => {
   }
 });
 
-// Público: crea un nuevo participante (solo la primera vez que se registra)
+// Público: crea un nuevo participante (solo la primera vez que se registra).
+// es_extranjero=true usa pasaporte en vez de DNI — mismo criterio que ya
+// usa el endpoint admin de extranjeros, solo que aquí es autoservicio.
 router.post('/participantes', async (req, res) => {
   const {
     numero_identificacion, nombre_completo, fecha_nacimiento, telefono_movil,
     departamento, municipio, capitulo, zona, cargo_fihnec, estado_civil,
     ha_recibido_saeles, veces_saeles_previas,
     contacto_emergencia_nombre, contacto_emergencia_telefono,
+    es_extranjero,
   } = req.body;
 
-  if (!validarDni(numero_identificacion)) {
+  if (es_extranjero) {
+    if (!numero_identificacion || !validarPasaporte(numero_identificacion.trim())) {
+      return res.status(400).json({ error: 'El número de pasaporte debe ser alfanumérico (5 a 20 caracteres).' });
+    }
+  } else if (!validarDni(numero_identificacion)) {
     return res.status(400).json({ error: 'El DNI debe tener 13 dígitos.' });
   }
   if (!nombre_completo || !fecha_nacimiento || !telefono_movil || !departamento || !municipio || !zona || !cargo_fihnec || !estado_civil) {
@@ -160,21 +199,42 @@ router.post('/participantes', async (req, res) => {
   }
 
   try {
-    const { rows } = await pool.query(
-      `INSERT INTO participantes (
-        numero_identificacion, nombre_completo, fecha_nacimiento, telefono_movil,
-        departamento, municipio, capitulo, zona, cargo_fihnec, estado_civil,
-        ha_recibido_saeles, veces_saeles_previas,
-        contacto_emergencia_nombre, contacto_emergencia_telefono
-      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
-      RETURNING id, nombre_completo`,
-      [
-        numero_identificacion, nombre_completo, fecha_nacimiento, telefono_movil,
-        departamento, municipio, capitulo || null, zona, cargo_fihnec, estado_civil,
-        !!ha_recibido_saeles, ha_recibido_saeles ? (veces_saeles_previas || 0) : null,
-        contacto_emergencia_nombre || null, contacto_emergencia_telefono || null,
-      ]
-    );
+    // Dos variantes de INSERT a propósito: para hondureños se omiten
+    // tipo_identificacion/tipo_participante para que tomen su valor por
+    // defecto de siempre (comportamiento sin cambios); para extranjeros
+    // se fijan explícitamente igual que en el registro manual del admin.
+    const { rows } = es_extranjero
+      ? await pool.query(
+          `INSERT INTO participantes (
+            numero_identificacion, tipo_identificacion, tipo_participante,
+            nombre_completo, fecha_nacimiento, telefono_movil,
+            departamento, municipio, capitulo, zona, cargo_fihnec, estado_civil,
+            ha_recibido_saeles, veces_saeles_previas,
+            contacto_emergencia_nombre, contacto_emergencia_telefono
+          ) VALUES ($1,'Pasaporte','extranjero',$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
+          RETURNING id, nombre_completo`,
+          [
+            numero_identificacion.trim().toUpperCase(), nombre_completo, fecha_nacimiento, telefono_movil,
+            departamento, municipio, capitulo || null, zona, cargo_fihnec, estado_civil,
+            !!ha_recibido_saeles, ha_recibido_saeles ? (veces_saeles_previas || 0) : null,
+            contacto_emergencia_nombre || null, contacto_emergencia_telefono || null,
+          ]
+        )
+      : await pool.query(
+          `INSERT INTO participantes (
+            numero_identificacion, nombre_completo, fecha_nacimiento, telefono_movil,
+            departamento, municipio, capitulo, zona, cargo_fihnec, estado_civil,
+            ha_recibido_saeles, veces_saeles_previas,
+            contacto_emergencia_nombre, contacto_emergencia_telefono
+          ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
+          RETURNING id, nombre_completo`,
+          [
+            numero_identificacion, nombre_completo, fecha_nacimiento, telefono_movil,
+            departamento, municipio, capitulo || null, zona, cargo_fihnec, estado_civil,
+            !!ha_recibido_saeles, ha_recibido_saeles ? (veces_saeles_previas || 0) : null,
+            contacto_emergencia_nombre || null, contacto_emergencia_telefono || null,
+          ]
+        );
     res.status(201).json(rows[0]);
   } catch (err) {
     if (err.code === '23505') {
@@ -184,6 +244,17 @@ router.post('/participantes', async (req, res) => {
   }
 });
 
+// Honduras es UTC-6 todo el año (sin horario de verano) — mismo criterio
+// fijo que ya usa eventos.js. Formatea "18:00" (24h) a "6:00 p. m." para
+// que el mensaje de error se lea igual que en el resto del sitio.
+function formatearHoraEs(horaHHMM) {
+  const [h, m] = (horaHHMM || '23:59').split(':').map(Number);
+  const meridiano = h >= 12 ? 'p. m.' : 'a. m.';
+  let hora12 = h % 12;
+  if (hora12 === 0) hora12 = 12;
+  return `${hora12}:${String(m).padStart(2, '0')} ${meridiano}`;
+}
+
 // Público: inscribe a un participante (ya existente) a un evento específico
 router.post('/inscripciones', async (req, res) => {
   const { participante_id, evento_id } = req.body;
@@ -191,13 +262,41 @@ router.post('/inscripciones', async (req, res) => {
     return res.status(400).json({ error: 'Faltan datos para completar la inscripción.' });
   }
   try {
-    const evento = await pool.query(`SELECT abierto FROM eventos WHERE id = $1`, [evento_id]);
+    const evento = await pool.query(
+      `SELECT abierto, fecha_limite_registro, hora_limite_registro FROM eventos WHERE id = $1`,
+      [evento_id]
+    );
     if (evento.rows.length === 0) {
       return res.status(404).json({ error: 'El evento no existe.' });
     }
     if (!evento.rows[0].abierto) {
       return res.status(400).json({ error: 'El registro para este evento está cerrado.' });
     }
+
+    // El plazo solo bloquea inscripciones NUEVAS — alguien que ya estaba
+    // inscrito y solo viene a actualizar sus datos (ej. cambió de teléfono)
+    // no debe quedar atrapado por el cierre del plazo, porque su cupo ya
+    // estaba asegurado desde antes.
+    const yaInscrito = await pool.query(
+      `SELECT 1 FROM inscripciones WHERE participante_id = $1 AND evento_id = $2`,
+      [participante_id, evento_id]
+    );
+    if (yaInscrito.rows.length === 0) {
+      const { fecha_limite_registro, hora_limite_registro } = evento.rows[0];
+      if (fecha_limite_registro) {
+        const fechaStr = new Date(fecha_limite_registro).toISOString().slice(0, 10);
+        const horaStr = hora_limite_registro || '23:59';
+        // "-06:00" aplicado explícitamente para comparar contra la hora
+        // Honduras real, sin depender de la zona horaria del servidor.
+        const limite = new Date(`${fechaStr}T${horaStr}:00.000-06:00`);
+        if (Date.now() > limite.getTime()) {
+          return res.status(400).json({
+            error: `El plazo de inscripción para este evento venció el ${fechaStr} a las ${formatearHoraEs(horaStr)} (hora Honduras).`,
+          });
+        }
+      }
+    }
+
     await pool.query(
       `INSERT INTO inscripciones (participante_id, evento_id) VALUES ($1, $2)`,
       [participante_id, evento_id]

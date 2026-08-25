@@ -7,6 +7,8 @@ export default function AdminDiplomas() {
   const [cargando, setCargando] = useState(true);
   const [error, setError] = useState('');
   const [descargando, setDescargando] = useState('');
+  const [pagina, setPagina] = useState(1);
+  const POR_PAGINA = 10;
 
   // --- Inventario de diplomas (standalone, captura manual) ---
   const [modoEdicionInventario, setModoEdicionInventario] = useState(false);
@@ -54,6 +56,7 @@ export default function AdminDiplomas() {
     }
     setCargando(true);
     setError('');
+    setPagina(1);
     api.get(`/admin/eventos/${eventoActual.id}/diplomas`)
       .then(({ data }) => setDatos(data))
       .catch((err) => setError(mensajeError(err)))
@@ -238,7 +241,7 @@ export default function AdminDiplomas() {
                   {(!datos || datos.filas.length === 0) && (
                     <tr><td colSpan={8} className="px-4 py-6 text-center text-ink/40">Todavía no hay participantes con asistencia confirmada en este evento.</td></tr>
                   )}
-                  {datos?.filas.map((f) => (
+                  {datos?.filas.slice((pagina - 1) * POR_PAGINA, pagina * POR_PAGINA).map((f) => (
                     <tr key={f.numero} className="border-b border-ink/5 text-left last:border-0">
                       <td className="px-4 py-3 text-ink/60">{f.numero}</td>
                       <td className="px-4 py-3 font-medium text-ink">{f.zona}</td>
@@ -264,6 +267,23 @@ export default function AdminDiplomas() {
                   </tfoot>
                 )}
               </table>
+              {datos && datos.filas.length > POR_PAGINA && (
+                <div className="flex flex-wrap items-center justify-between gap-2 border-t border-ink/10 px-4 py-3 print:hidden">
+                  <p className="text-xs text-ink/40">
+                    Mostrando {(pagina - 1) * POR_PAGINA + 1}–{Math.min(pagina * POR_PAGINA, datos.filas.length)} de {datos.filas.length}
+                  </p>
+                  <div className="flex flex-wrap items-center gap-1">
+                    {Array.from({ length: Math.ceil(datos.filas.length / POR_PAGINA) }, (_, i) => i + 1).map((n) => (
+                      <button
+                        key={n} onClick={() => setPagina(n)}
+                        className={`rounded-full px-2.5 py-1 text-xs font-semibold ${n === pagina ? 'bg-[#007334] text-white' : 'border border-ink/15 text-ink/70 hover:bg-ink/5'}`}
+                      >
+                        {n}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
           )}
         </>

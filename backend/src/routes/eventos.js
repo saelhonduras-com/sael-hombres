@@ -14,7 +14,7 @@ function mesEnCursoHonduras() {
 router.get('/eventos', async (req, res) => {
   try {
     const { rows } = await pool.query(
-      `SELECT id, nombre, anio, mes, fecha_inicio, fecha_fin, fecha_limite_registro, abierto, es_actual,
+      `SELECT id, nombre, anio, mes, fecha_inicio, fecha_fin, fecha_limite_registro, hora_limite_registro, abierto, es_actual,
               boleto_inicio, boleto_siguiente
        FROM eventos
        ORDER BY fecha_inicio DESC`
@@ -27,9 +27,12 @@ router.get('/eventos', async (req, res) => {
 
 // Admin: crea un evento nuevo
 router.post('/admin/eventos', requireAuth, requireModulo('eventos', 'edicion'), async (req, res) => {
-  const { nombre, anio, mes, fecha_inicio, fecha_fin, fecha_limite_registro, abierto, es_actual } = req.body;
+  const { nombre, anio, mes, fecha_inicio, fecha_fin, fecha_limite_registro, hora_limite_registro, abierto, es_actual } = req.body;
   if (!nombre || !anio || !mes || !fecha_inicio || !fecha_fin || !fecha_limite_registro) {
     return res.status(400).json({ error: 'Faltan campos obligatorios.' });
+  }
+  if (hora_limite_registro && !/^([01]\d|2[0-3]):([0-5]\d)$/.test(hora_limite_registro)) {
+    return res.status(400).json({ error: 'La hora límite de registro debe tener formato HH:MM (24 horas).' });
   }
   // Regla: ningún evento puede estar abierto si no es el evento actual.
   if (abierto && !es_actual) {
@@ -62,9 +65,9 @@ router.post('/admin/eventos', requireAuth, requireModulo('eventos', 'edicion'), 
       await cliente.query(`UPDATE eventos SET es_actual = false, abierto = false WHERE es_actual = true`);
     }
     const { rows } = await cliente.query(
-      `INSERT INTO eventos (nombre, anio, mes, fecha_inicio, fecha_fin, fecha_limite_registro, abierto, es_actual)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *`,
-      [nombre, anio, mes, fecha_inicio, fecha_fin, fecha_limite_registro, !!abierto, !!es_actual]
+      `INSERT INTO eventos (nombre, anio, mes, fecha_inicio, fecha_fin, fecha_limite_registro, hora_limite_registro, abierto, es_actual)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *`,
+      [nombre, anio, mes, fecha_inicio, fecha_fin, fecha_limite_registro, hora_limite_registro || '23:59', !!abierto, !!es_actual]
     );
     await cliente.query('COMMIT');
     res.status(201).json(rows[0]);
@@ -79,7 +82,10 @@ router.post('/admin/eventos', requireAuth, requireModulo('eventos', 'edicion'), 
 // Admin: edita un evento existente
 router.put('/admin/eventos/:id', requireAuth, requireModulo('eventos', 'edicion'), async (req, res) => {
   const { id } = req.params;
-  const { nombre, anio, mes, fecha_inicio, fecha_fin, fecha_limite_registro, abierto, es_actual } = req.body;
+  const { nombre, anio, mes, fecha_inicio, fecha_fin, fecha_limite_registro, hora_limite_registro, abierto, es_actual } = req.body;
+  if (hora_limite_registro && !/^([01]\d|2[0-3]):([0-5]\d)$/.test(hora_limite_registro)) {
+    return res.status(400).json({ error: 'La hora límite de registro debe tener formato HH:MM (24 horas).' });
+  }
   // Regla: ningún evento puede estar abierto si no es el evento actual.
   if (abierto && !es_actual) {
     return res.status(400).json({ error: 'Un evento no puede estar abierto si no es el evento actual. Márcalo como actual, o déjalo cerrado.' });
@@ -115,8 +121,8 @@ router.put('/admin/eventos/:id', requireAuth, requireModulo('eventos', 'edicion'
     }
     const { rows } = await cliente.query(
       `UPDATE eventos SET nombre=$1, anio=$2, mes=$3, fecha_inicio=$4, fecha_fin=$5,
-       fecha_limite_registro=$6, abierto=$7, es_actual=$8 WHERE id=$9 RETURNING *`,
-      [nombre, anio, mes, fecha_inicio, fecha_fin, fecha_limite_registro, !!abierto, !!es_actual, id]
+       fecha_limite_registro=$6, hora_limite_registro=$7, abierto=$8, es_actual=$9 WHERE id=$10 RETURNING *`,
+      [nombre, anio, mes, fecha_inicio, fecha_fin, fecha_limite_registro, hora_limite_registro || '23:59', !!abierto, !!es_actual, id]
     );
     if (rows.length === 0) {
       await cliente.query('ROLLBACK');

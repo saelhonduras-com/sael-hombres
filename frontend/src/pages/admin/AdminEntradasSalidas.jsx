@@ -17,6 +17,7 @@ export default function AdminEntradasSalidas() {
   const [eventoActual, setEventoActual] = useState(null);
   const [cargando, setCargando] = useState(true);
   const [error, setError] = useState('');
+  const [seccion, setSeccion] = useState('boleteria'); // boleteria | entradas | salidas | comida | habitaciones
 
   // --- Boletería ---
   const [resumenBoleteria, setResumenBoleteria] = useState(null);
@@ -214,6 +215,33 @@ export default function AdminEntradasSalidas() {
 
       {error && <p className="mt-4 rounded-lg bg-ember/10 p-3 text-sm text-ember">{error}</p>}
 
+      {eventoActual && (
+        <div className="mt-4 flex flex-wrap gap-2">
+          {[
+            { id: 'boleteria', label: 'Boletería', color: '#FDC41F', textDark: true },
+            { id: 'entradas', label: 'Entradas de Efectivo', color: '#007334' },
+            { id: 'salidas', label: 'Salidas de Efectivo', color: '#E40521' },
+            { id: 'comida', label: 'Precio por Comida', color: '#1F3464' },
+            { id: 'habitaciones', label: 'Habitaciones', color: '#0F7173' },
+          ].map((t) => {
+            const activo = seccion === t.id;
+            return (
+              <button
+                key={t.id}
+                onClick={() => setSeccion(t.id)}
+                style={activo ? { backgroundColor: t.color } : {}}
+                className={`rounded-full px-4 py-1.5 text-xs font-semibold transition ${
+                  activo ? (t.textDark ? 'text-night' : 'text-white') : 'border border-ink/15 text-ink/70 hover:bg-ink/5'
+                }`}
+              >
+                {!activo && <span className="mr-1.5 inline-block h-2 w-2 rounded-full align-middle" style={{ backgroundColor: t.color }} />}
+                {t.label}
+              </button>
+            );
+          })}
+        </div>
+      )}
+
       {!eventoActual && !cargando && (
         <p className="mt-6 text-sm text-ink/40">No hay un evento SAEL marcado como actual/abierto en este momento.</p>
       )}
@@ -221,6 +249,7 @@ export default function AdminEntradasSalidas() {
       {eventoActual && cargando ? <p className="mt-6 text-ink/40">Cargando…</p> : eventoActual && (
         <div className="mt-4 space-y-6">
           {/* BOLETERÍA */}
+          {seccion === 'boleteria' && (
           <div className="rounded-2xl border border-ink/10 border-l-4 border-l-[#FDC41F] bg-white p-6 shadow-sm">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <div>
@@ -331,8 +360,10 @@ export default function AdminEntradasSalidas() {
               </div>
             </div>
           </div>
+          )}
 
           {/* ENTRADAS DE EFECTIVO — cuentas de ingreso del Catálogo */}
+          {seccion === 'entradas' && (
           <SeccionValoresCuenta
             titulo="Entradas de Efectivo"
             subtitulo="Alimentación, Ofrenda, Renta de espacio, y cualquier otro concepto que necesites — todo tomado del Catálogo de Cuentas (ingresos)."
@@ -342,8 +373,10 @@ export default function AdminEntradasSalidas() {
             puedeEditar={puedeEditar}
             colorBorde="#007334"
           />
+          )}
 
           {/* SALIDAS DE EFECTIVO — cuentas de egreso del Catálogo */}
+          {seccion === 'salidas' && (
           <SeccionValoresCuenta
             titulo="Salidas de Efectivo"
             subtitulo="Alimentación que paga la organización, Vigilia Saelistas, Ofrendas entregadas, y demás egresos — tomado del Catálogo de Cuentas (egresos)."
@@ -353,10 +386,12 @@ export default function AdminEntradasSalidas() {
             puedeEditar={puedeEditar}
             colorBorde="#E40521"
           />
+          )}
 
           {/* PRECIO POR COMIDA — cantidad calculada sola (participantes +
               Saelistas para el evento, o solo Saelistas para Vigilia),
               solo el precio unitario se escribe a mano. */}
+          {seccion === 'comida' && (
           <div className="rounded-2xl border border-ink/10 border-l-4 border-l-[#1F3464] bg-white p-6 shadow-sm">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <div>
@@ -415,8 +450,10 @@ export default function AdminEntradasSalidas() {
               </div>
             ))}
           </div>
+          )}
 
           {/* INGRESO POR PERSONA DE HABITACIONES (antes "Hotel por módulo") */}
+          {seccion === 'habitaciones' && (
           <div className="rounded-2xl border border-ink/10 border-l-4 border-l-[#0F7173] bg-white p-6 shadow-sm">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <div>
@@ -499,6 +536,7 @@ export default function AdminEntradasSalidas() {
               ))}
             </div>
           </div>
+          )}
         </div>
       )}
     </div>

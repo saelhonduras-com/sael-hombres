@@ -9,7 +9,7 @@ const MESES = [
 
 const vacio = {
   nombre: '', anio: new Date().getFullYear(), mes: 1,
-  fecha_inicio: '', fecha_fin: '', fecha_limite_registro: '',
+  fecha_inicio: '', fecha_fin: '', fecha_limite_registro: '', hora_limite_registro: '23:59',
   abierto: true, es_actual: false,
 };
 
@@ -29,10 +29,12 @@ function proximoMesTexto() {
   return `1 de ${MESES[siguienteMes - 1]} de ${siguienteAnio}`;
 }
 
-// Cuenta regresiva a la fecha límite de registro, mismo estilo que el
-// contador del hero público (días / horas / min). Regresa null si ya venció.
-function calcularCuentaRegresiva(fechaLimite) {
-  const limite = new Date(`${fechaLimite}T23:59:59`);
+// Cuenta regresiva a la fecha (y hora) límite de registro, mismo estilo
+// que el contador del hero público (días / horas / min). Regresa null si
+// ya venció. horaLimite viene en formato "HH:MM" — si no llega ninguna
+// (eventos viejos sin el campo todavía), cae a medianoche como antes.
+function calcularCuentaRegresiva(fechaLimite, horaLimite) {
+  const limite = new Date(`${fechaLimite}T${horaLimite || '23:59'}:00`);
   const diff = limite - new Date();
   if (diff <= 0) return null;
   return {
@@ -40,6 +42,29 @@ function calcularCuentaRegresiva(fechaLimite) {
     horas: Math.floor((diff / (1000 * 60 * 60)) % 24),
     minutos: Math.floor((diff / (1000 * 60)) % 60),
   };
+}
+
+// Convierte "HH:MM" (24h, como se guarda en la base) a las tres partes
+// que necesita el selector de 12 horas con AM/PM.
+function a12Horas(horaHHMM) {
+  const [h, m] = (horaHHMM || '23:59').split(':').map(Number);
+  const meridiano = h >= 12 ? 'PM' : 'AM';
+  let hora12 = h % 12;
+  if (hora12 === 0) hora12 = 12;
+  return { hora12, minuto: m, meridiano };
+}
+
+// Y de vuelta a "HH:MM" (24h) para guardar en la base.
+function a24Horas(hora12, minuto, meridiano) {
+  let h = Number(hora12) % 12;
+  if (meridiano === 'PM') h += 12;
+  return `${String(h).padStart(2, '0')}:${String(minuto).padStart(2, '0')}`;
+}
+
+// Para mostrar en el listado, ej. "23:59" → "11:59 PM"
+function formatearHora12(horaHHMM) {
+  const { hora12, minuto, meridiano } = a12Horas(horaHHMM);
+  return `${hora12}:${String(minuto).padStart(2, '0')} ${meridiano}`;
 }
 
 function CajaTiempo({ valor, etiqueta }) {
@@ -109,6 +134,7 @@ export default function AdminEventos() {
       nombre: ev.nombre, anio: ev.anio, mes: ev.mes,
       fecha_inicio: ev.fecha_inicio.slice(0, 10), fecha_fin: ev.fecha_fin.slice(0, 10),
       fecha_limite_registro: ev.fecha_limite_registro.slice(0, 10),
+      hora_limite_registro: ev.hora_limite_registro || '23:59',
       abierto: ev.abierto, es_actual: ev.es_actual,
     });
     setEditando(ev.id);
@@ -258,6 +284,42 @@ export default function AdminEventos() {
                 <span className="mb-1 block text-xs font-semibold text-ink/60">Fecha límite de registro</span>
                 <input type="date" value={form.fecha_limite_registro} onChange={(e) => setForm((f) => ({ ...f, fecha_limite_registro: e.target.value }))} className={claseInput} />
               </label>
+              <label className="col-span-2">
+                <span className="mb-1 block text-xs font-semibold text-ink/60">Hora límite de registro (Honduras)</span>
+                <div className="flex gap-2">
+                  <select
+                    value={a12Horas(form.hora_limite_registro).hora12}
+                    onChange={(e) => {
+                      const { minuto, meridiano } = a12Horas(form.hora_limite_registro);
+                      setForm((f) => ({ ...f, hora_limite_registro: a24Horas(e.target.value, minuto, meridiano) }));
+                    }}
+                    className={claseInput}
+                  >
+                    {Array.from({ length: 12 }, (_, i) => i + 1).map((h) => <option key={h} value={h}>{h}</option>)}
+                  </select>
+                  <select
+                    value={a12Horas(form.hora_limite_registro).minuto}
+                    onChange={(e) => {
+                      const { hora12, meridiano } = a12Horas(form.hora_limite_registro);
+                      setForm((f) => ({ ...f, hora_limite_registro: a24Horas(hora12, e.target.value, meridiano) }));
+                    }}
+                    className={claseInput}
+                  >
+                    {Array.from({ length: 60 }, (_, i) => i).map((m) => <option key={m} value={m}>{String(m).padStart(2, '0')}</option>)}
+                  </select>
+                  <select
+                    value={a12Horas(form.hora_limite_registro).meridiano}
+                    onChange={(e) => {
+                      const { hora12, minuto } = a12Horas(form.hora_limite_registro);
+                      setForm((f) => ({ ...f, hora_limite_registro: a24Horas(hora12, minuto, e.target.value) }));
+                    }}
+                    className={claseInput}
+                  >
+                    <option value="AM">AM</option>
+                    <option value="PM">PM</option>
+                  </select>
+                </div>
+              </label>
             </div>
 
             <p className="mb-1.5 mt-4 text-[11px] font-semibold uppercase tracking-wide text-ink/40">Estado</p>
@@ -297,7 +359,7 @@ export default function AdminEventos() {
           <div className="mt-4 space-y-2">
             {eventos.length === 0 && <p className="text-sm text-ink/40">Sin eventos registrados todavía.</p>}
             {eventos.map((ev) => {
-              const cuenta = ev.abierto ? calcularCuentaRegresiva(ev.fecha_limite_registro.slice(0, 10)) : null;
+              const cuenta = ev.abierto ? calcularCuentaRegresiva(ev.fecha_limite_registro.slice(0, 10), ev.hora_limite_registro) : null;
               const conteo = conteos[ev.id];
               return (
                 <div key={ev.id} className="flex flex-wrap items-center gap-x-6 gap-y-2 rounded-xl border border-ink/10 bg-white p-3 shadow-sm">
@@ -312,7 +374,7 @@ export default function AdminEventos() {
                       </span>
                     </p>
                     <p className="mt-0.5 text-xs text-ink/50">
-                      {ev.fecha_inicio.slice(0, 10)} al {ev.fecha_fin.slice(0, 10)} · Límite: {ev.fecha_limite_registro.slice(0, 10)}
+                      {ev.fecha_inicio.slice(0, 10)} al {ev.fecha_fin.slice(0, 10)} · Límite: {ev.fecha_limite_registro.slice(0, 10)} {formatearHora12(ev.hora_limite_registro)}
                     </p>
                   </div>
 

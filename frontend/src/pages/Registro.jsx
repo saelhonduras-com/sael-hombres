@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, Link } from 'react-router-dom';
 import api, { mensajeError } from '../api';
 import {
   DEPARTAMENTOS_HONDURAS, MUNICIPIOS_POR_DEPARTAMENTO,
@@ -11,6 +11,7 @@ const NOMBRES_PASOS = ['DNI', 'Datos personales', 'Ubicación', 'Datos FIHNEC', 
 
 const vacio = {
   dni: '',
+  es_extranjero: false,
   nombre_completo: '',
   fecha_nacimiento: '',
   telefono_movil: '',
@@ -68,6 +69,26 @@ function Encabezado({ etiqueta }) {
   );
 }
 
+// Bandera de Honduras en SVG — evita depender del emoji 🇭🇳, que en
+// Windows a veces no se renderiza bien (mismo problema que tuvimos
+// antes con otros emojis del checklist).
+function BanderaHonduras({ className = 'h-3.5 w-5' }) {
+  const estrella = '0,-1 0.22,-0.31 0.95,-0.31 0.36,0.12 0.59,0.95 0,0.5 -0.59,0.95 -0.36,0.12 -0.95,-0.31 -0.22,-0.31';
+  return (
+    <svg viewBox="0 0 30 20" className={className}>
+      <rect width="30" height="20" fill="#0073CF" />
+      <rect y="6.67" width="30" height="6.67" fill="#fff" />
+      <g fill="#0073CF">
+        <polygon points={estrella} transform="translate(9,8.3) scale(0.7)" />
+        <polygon points={estrella} transform="translate(15,7.7) scale(0.7)" />
+        <polygon points={estrella} transform="translate(21,8.3) scale(0.7)" />
+        <polygon points={estrella} transform="translate(11.5,11.5) scale(0.7)" />
+        <polygon points={estrella} transform="translate(18.5,11.5) scale(0.7)" />
+      </g>
+    </svg>
+  );
+}
+
 function TarjetaMarca({ children, className = '' }) {
   return (
     <div className={`overflow-hidden rounded-2xl border border-ink/10 bg-white shadow-sm ${className}`}>
@@ -105,6 +126,30 @@ function CampoGrupo({ etiqueta, children }) {
 
 const claseInput = 'w-full rounded-lg border border-ink/15 bg-white px-3 py-2.5 text-sm text-ink transition focus:border-ember focus:outline-none focus:ring-4 focus:ring-ember/10';
 
+// "18:00" (24h, como se guarda) → "6:00 p. m." (12h, estilo RAE — igual
+// al que usa Home.jsx y el formulario del SFL).
+function formatearHoraEs(horaHHMM) {
+  if (!horaHHMM) return null;
+  const [h, m] = horaHHMM.split(':').map(Number);
+  const meridiano = h >= 12 ? 'p. m.' : 'a. m.';
+  let hora12 = h % 12;
+  if (hora12 === 0) hora12 = 12;
+  return `${hora12}:${String(m).padStart(2, '0')} ${meridiano}`;
+}
+
+// Mismo cálculo que hace el backend en POST /inscripciones (fecha+hora
+// límite, en hora Honduras real vía offset -06:00 explícito) — se
+// duplica aquí a propósito para poder bloquear la entrada al formulario
+// desde el frontend, sin esperar a que la persona llegue hasta el final
+// del wizard para enterarse de que ya no puede inscribirse.
+function plazoVencido(evento) {
+  if (!evento?.fecha_limite_registro) return false;
+  const fechaStr = evento.fecha_limite_registro.slice(0, 10);
+  const horaStr = evento.hora_limite_registro || '23:59';
+  const limite = new Date(`${fechaStr}T${horaStr}:00.000-06:00`);
+  return Date.now() > limite.getTime();
+}
+
 export default function Registro() {
   const navigate = useNavigate();
   const hoy = new Date().toISOString().slice(0, 10);
@@ -134,10 +179,12 @@ export default function Registro() {
   }, [eventos, error]);
 
   // Una vez completada la inscripción, regresa solo al inicio después de
-  // unos segundos (con opción de irse antes con el botón manual).
+  // un rato (con opción de irse antes con el botón manual). Se alargó a
+  // 60s porque ahora se muestra el recordatorio del equipaje completo,
+  // y hace falta más tiempo para leerlo con calma.
   useEffect(() => {
     if (!inscripcionCompleta) return;
-    const temporizador = setTimeout(() => navigate('/'), 4000);
+    const temporizador = setTimeout(() => navigate('/'), 60000);
     return () => clearTimeout(temporizador);
   }, [inscripcionCompleta, navigate]);
 
@@ -145,7 +192,6 @@ export default function Registro() {
   // está abierto — antes esto se pasaba por alto y dejaba pasar al DNI
   // aunque el evento actual estuviera cerrado.
   const eventoActual = eventos?.find((ev) => ev.es_actual && ev.abierto) || eventos?.find((ev) => ev.abierto) || null;
-
   const municipiosDisponibles = form.departamento ? (MUNICIPIOS_POR_DEPARTAMENTO[form.departamento] || []) : [];
   const municipiosEdicion = formEdicion?.departamento ? (MUNICIPIOS_POR_DEPARTAMENTO[formEdicion.departamento] || []) : [];
 
@@ -155,13 +201,19 @@ export default function Registro() {
 
   async function verificarDni() {
     setError('');
-    if (!/^\d{13}$/.test(form.dni)) {
+    if (form.es_extranjero) {
+      if (!/^[A-Za-z0-9]{5,20}$/.test(form.dni)) {
+        setError('El número de pasaporte debe ser alfanumérico (5 a 20 caracteres).');
+        return;
+      }
+    } else if (!/^\d{13}$/.test(form.dni)) {
       setError('El DNI debe tener 13 dígitos.');
       return;
     }
     setCargando(true);
     try {
-      const { data } = await api.get(`/participantes/dni/${form.dni}`);
+      const ruta = form.es_extranjero ? `/participantes/pasaporte/${form.dni}` : `/participantes/dni/${form.dni}`;
+      const { data } = await api.get(ruta);
       if (data.existe) {
         setParticipanteExistente(data.participante);
       } else {
@@ -278,6 +330,7 @@ export default function Registro() {
     try {
       const { data: nuevo } = await api.post('/participantes', {
         numero_identificacion: form.dni,
+        es_extranjero: form.es_extranjero,
         nombre_completo: form.nombre_completo,
         fecha_nacimiento: form.fecha_nacimiento,
         telefono_movil: form.telefono_movil,
@@ -343,6 +396,27 @@ export default function Registro() {
     );
   }
 
+  if (plazoVencido(eventoActual)) {
+    return (
+      <div className="flex min-h-[60vh] items-center justify-center bg-parchment px-5">
+        <div className="w-full max-w-md">
+          <TarjetaMarca className="text-center">
+            <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-amber-500/10">
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-amber-600">
+                <rect x="3" y="11" width="18" height="10" rx="2" ry="2" />
+                <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+              </svg>
+            </div>
+            <h1 className="mt-4 font-display text-2xl font-bold text-ink">Registro cerrado</h1>
+            <p className="mt-2 text-ink/50">
+              El registro para <strong>{eventoActual.nombre}</strong> no está disponible en este momento.
+            </p>
+          </TarjetaMarca>
+        </div>
+      </div>
+    );
+  }
+
   if (inscripcionCompleta) {
     return (
       <div className="flex min-h-[60vh] items-center justify-center bg-parchment px-5">
@@ -356,6 +430,26 @@ export default function Registro() {
             <h1 className="mt-4 font-display text-2xl font-bold text-ink">{mensajeExito}</h1>
             <p className="mt-2 text-lg font-semibold text-ink">{nombreInscrito}</p>
             <p className="mt-2 text-ink/60">Quedaste registrado en <strong>{eventoActual.nombre}</strong>. Nos vemos ahí.</p>
+
+            <div className="mt-6 rounded-xl bg-parchment-2 p-4 text-left">
+              <p className="whitespace-pre-line text-xs leading-relaxed text-ink/70">
+                <strong className="text-sm text-ink">📢 ¡RECORDATORIO IMPORTANTE! 📢</strong>
+                {'\n\n'}
+{`Se vienen 3 días increíbles del SAEL y queremos que estés 100% preparado para disfrutar al máximo y pasarla cómodo, por ello te recordamos traer lo siguiente:
+
+🎒 Checklist de equipaje:
+
+🆔 Esenciales: Identificación (DNI).
+🧼 Higiene personal: Jabón, cepillo, pasta de dientes, desodorante, champú y toalla.
+😴 Dormitorio: Ropa de cama, colcha/cobija, almohada y lo que necesites para dormir cómodo.
+🧥 Ropa y calzado: Ropa suficiente para los 3 días, abrigo (para la noche/frío) y calzado cómodo.
+💊 Salud y cuidado: Medicamentos personales, botiquín básico y repelente de insectos.
+✨ Extras: Cualquier otro artículo personal que consideres necesario para tu comodidad.
+
+¡Revisa tu equipaje antes de salir y nos vemos pronto! 🚀🔥`}
+              </p>
+            </div>
+
             <p className="mt-6 text-xs text-ink/40">Te llevaremos al inicio en unos segundos…</p>
             <button onClick={() => navigate('/')} className="mt-2 text-sm font-semibold text-ember hover:underline">
               Ir al inicio ahora
@@ -489,6 +583,13 @@ export default function Registro() {
       <div className="mx-auto max-w-xl">
         <Encabezado etiqueta={`Inscripción · ${eventoActual.nombre}`} />
 
+        {paso === 1 && eventoActual.fecha_limite_registro && (
+          <p className="mb-4 text-center text-sm font-semibold text-ink/70">
+            ⏰ Inscripciones hasta el {new Date(eventoActual.fecha_limite_registro).toLocaleDateString('es-HN', { day: 'numeric', month: 'long', year: 'numeric' })}
+            {eventoActual.hora_limite_registro && `, ${formatearHoraEs(eventoActual.hora_limite_registro)}`}
+          </p>
+        )}
+
         <div className="mb-2 flex items-center justify-between text-xs font-semibold text-ink/40">
           <span>Paso {paso} de {TOTAL_PASOS}</span>
           <span>{NOMBRES_PASOS[paso - 1]}</span>
@@ -505,27 +606,70 @@ export default function Registro() {
 
           {paso === 1 && (
             <div className="space-y-4 text-center">
-              <h2 className="font-display text-xl font-bold text-ink">Empecemos con tu DNI</h2>
+              <h2 className="font-display text-xl font-bold text-ink">
+                {form.es_extranjero ? 'Empecemos con tu pasaporte' : 'Empecemos con tu DNI'}
+              </h2>
+
+              <div className="flex justify-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => { setForm((f) => ({ ...f, es_extranjero: false, dni: '' })); setError(''); }}
+                  className={`flex items-center gap-1.5 rounded-full px-4 py-1.5 text-sm font-semibold transition ${
+                    !form.es_extranjero ? 'bg-night text-white' : 'border border-ink/20 text-ink/60 hover:bg-ink/5'
+                  }`}
+                >
+                  <BanderaHonduras /> Hondureño
+                </button>
+                <button
+                  type="button"
+                  onClick={() => { setForm((f) => ({ ...f, es_extranjero: true, dni: '' })); setError(''); }}
+                  className={`rounded-full px-4 py-1.5 text-sm font-semibold transition ${
+                    form.es_extranjero ? 'bg-night text-white' : 'border border-ink/20 text-ink/60 hover:bg-ink/5'
+                  }`}
+                >
+                  🌎 Extranjero
+                </button>
+              </div>
+
               <label className="block">
-                <input
-                  type="text" inputMode="numeric" maxLength={13} value={form.dni}
-                  onChange={(e) => actualizar('dni', e.target.value.replace(/\D/g, ''))}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter' && form.dni.length === 13 && !cargando) verificarDni();
-                  }}
-                  className="w-full rounded-lg border border-ink/15 bg-white px-3 py-3 text-center font-display text-2xl tracking-widest text-ink transition focus:border-ember focus:outline-none focus:ring-4 focus:ring-ember/10"
-                  placeholder="0801199012345"
-                />
+                {form.es_extranjero ? (
+                  <input
+                    type="text" maxLength={20} value={form.dni}
+                    onChange={(e) => actualizar('dni', e.target.value.toUpperCase())}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' && form.dni.length >= 5 && !cargando) verificarDni();
+                    }}
+                    className="w-full rounded-lg border border-ink/15 bg-white px-3 py-3 text-center font-display text-2xl tracking-widest text-ink transition focus:border-ember focus:outline-none focus:ring-4 focus:ring-ember/10"
+                    placeholder="Número de pasaporte"
+                  />
+                ) : (
+                  <input
+                    type="text" inputMode="numeric" maxLength={13} value={form.dni}
+                    onChange={(e) => actualizar('dni', e.target.value.replace(/\D/g, ''))}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' && form.dni.length === 13 && !cargando) verificarDni();
+                    }}
+                    className="w-full rounded-lg border border-ink/15 bg-white px-3 py-3 text-center font-display text-2xl tracking-widest text-ink transition focus:border-ember focus:outline-none focus:ring-4 focus:ring-ember/10"
+                    placeholder="0801199012345"
+                  />
+                )}
                 <span className="mt-2 block text-center text-base font-semibold text-ink/50">
-                  {form.dni.length}/13 dígitos
+                  {form.es_extranjero ? `${form.dni.length} caracteres` : `${form.dni.length}/13 dígitos`}
                 </span>
               </label>
               <div className="flex justify-center pt-2">
                 <Boton onClick={verificarDni} disabled={cargando}>{cargando ? 'Verificando…' : 'Continuar'}</Boton>
               </div>
-              <p className="rounded-lg bg-[#1F3464]/5 px-3 py-2 text-xs text-ink/50">
-                ¿Eres extranjero? Tu inscripción a este evento es de forma presencial.
-              </p>
+
+              <Link
+                to="/#reserva-habitaciones"
+                className="mt-4 flex items-center justify-center gap-2 rounded-2xl border border-[#25D366]/25 bg-[#25D366]/10 px-4 py-2.5 text-xs font-semibold text-[#128C7E] transition hover:bg-[#25D366]/15"
+              >
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" className="shrink-0">
+                  <path d="M12.04 2C6.58 2 2.13 6.45 2.13 11.91c0 1.75.46 3.45 1.32 4.95L2.05 22l5.25-1.38a9.9 9.9 0 0 0 4.74 1.2h.01c5.46 0 9.91-4.45 9.91-9.91S17.5 2 12.04 2Zm5.83 14.16c-.24.68-1.4 1.3-1.93 1.36-.5.06-1 .27-3.34-.7-2.82-1.16-4.63-4-4.77-4.19-.14-.19-1.15-1.53-1.15-2.92 0-1.39.73-2.07.99-2.35.26-.28.56-.35.75-.35.19 0 .37 0 .53.01.17.01.4-.06.62.48.24.58.81 2 .88 2.15.07.15.12.32.02.51-.1.19-.15.31-.29.48-.15.17-.31.38-.44.51-.15.15-.3.31-.13.6.17.29.76 1.25 1.63 2.02 1.12 1 2.06 1.31 2.35 1.46.29.15.46.13.63-.08.17-.2.72-.84.92-1.13.19-.29.38-.24.63-.14.26.1 1.65.78 1.93.92.29.15.48.22.55.34.07.13.07.75-.17 1.43Z" />
+                </svg>
+                ¿Reservación de habitación? <span className="font-bold">Ver instrucciones</span>
+              </Link>
             </div>
           )}
 
@@ -665,7 +809,7 @@ export default function Registro() {
               <h2 className="font-display text-xl font-bold text-ink">Revisa tus datos</h2>
               <dl className="divide-y divide-ink/10 text-sm">
                 {[
-                  ['DNI', form.dni],
+                  [form.es_extranjero ? 'Pasaporte' : 'DNI', form.dni],
                   ['Nombre', form.nombre_completo],
                   ['Fecha de nacimiento', form.fecha_nacimiento],
                   ['Teléfono', form.telefono_movil],

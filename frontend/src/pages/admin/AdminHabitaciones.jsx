@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useOutletContext } from 'react-router-dom';
 import api, { mensajeError } from '../../api';
 
@@ -6,14 +6,25 @@ const claseInput = 'w-full rounded-lg border border-ink/15 px-3 py-2 text-sm foc
 const btnEditar = 'rounded-full bg-[#007334]/10 px-3 py-1 text-xs font-semibold text-[#007334] hover:bg-[#007334]/20';
 const btnEliminar = 'rounded-full bg-ember/10 px-3 py-1 text-xs font-semibold text-ember hover:bg-ember/20';
 
+const POR_PAGINA = 10;
+
+// Cuatro estados, ya sin "parcial" — colores y texto según lo aprobado
+// en el mockup: Ocupada (rojo), Disponible (verde), Bloqueada (ámbar),
+// Seguridad (azul/acento).
+const ESTILO_ESTADO = {
+  OCUPADA: { texto: 'Ocupada', badge: 'bg-ember/15 text-ember', borde: 'border-l-ember', fondo: 'bg-ember/10' },
+  DISPONIBLE: { texto: 'Disponible', badge: 'bg-[#007334]/15 text-[#007334]', borde: 'border-l-[#007334]', fondo: 'bg-[#007334]/10' },
+  BLOQUEADA: { texto: 'Bloqueada', badge: 'bg-amber-500/15 text-amber-600', borde: 'border-l-amber-500', fondo: 'bg-amber-500/10' },
+  SEGURIDAD: { texto: 'Seguridad', badge: 'bg-[#0F7173]/15 text-[#0F7173]', borde: 'border-l-[#0F7173]', fondo: 'bg-[#0F7173]/10' },
+};
+
 const vacioHabitacion = { numero: '', capacidad: '', notas: '', modulo_id: '' };
 const vacioModulo = { nombre: '', precio_por_persona: '', notas: '' };
-const vacioOcupante = { tipo_ocupante: 'participante', seleccionado: null, monto: '', metodo_pago: '', banco_o_recibo: '', observaciones: '' };
+const vacioTitular = { tipo_ocupante: 'participante', seleccionado: null, metodo_pago: '', numero_transferencia: '', observaciones: '' };
+const vacioAdicional = { tipo_ocupante: 'participante', seleccionado: null };
 
 export default function AdminHabitaciones() {
   const { rol, permisosPorModulo } = useOutletContext();
-  // Solo el rol "admin" queda sujeto al nivel configurado en Usuarios —
-  // super_admin y los demás roles fijos quedan exactamente como estaban.
   const puedeEditar = rol === 'admin' ? permisosPorModulo?.['habitaciones'] === 'edicion' : true;
 
   const [eventoActual, setEventoActual] = useState(null);
@@ -22,45 +33,49 @@ export default function AdminHabitaciones() {
   const [habitaciones, setHabitaciones] = useState([]);
   const [cargando, setCargando] = useState(true);
   const [error, setError] = useState('');
+  const [aviso, setAviso] = useState(null); // string | null — toast de confirmación
 
-  // Bloqueado por defecto — evita clics accidentales en Editar/Eliminar
-  // módulo u habitación. NO afecta Asignar/Gestionar ocupantes, que es
-  // el uso normal del día a día.
   const [modoEdicion, setModoEdicion] = useState(false);
 
-  // Cada módulo colapsado por defecto, para no tener una fila larguísima
-  // según se van creando más — se expande individualmente al hacer clic
-  // en su encabezado.
-  const [expandidos, setExpandidos] = useState({}); // { [moduloId | 'sin-modulo']: boolean }
-  function alternarExpandido(clave) {
-    setExpandidos((e) => ({ ...e, [clave]: !e[clave] }));
-  }
+  // --- Filtro, búsqueda y paginación de la lista de habitaciones ---
+  const [filtroModulo, setFiltroModulo] = useState('todas'); // 'todas' | moduloId | 'seguridad'
+  const [soloSinCobro, setSoloSinCobro] = useState(false);
+  const [busqueda, setBusqueda] = useState('');
+  const [pagina, setPagina] = useState(1);
 
-  const [editandoHabitacionId, setEditandoHabitacionId] = useState(null); // id o 'nueva'
+  const [editandoHabitacionId, setEditandoHabitacionId] = useState(null);
   const [formHabitacion, setFormHabitacion] = useState(vacioHabitacion);
-  const [editandoModuloId, setEditandoModuloId] = useState(null); // id o 'nuevo'
+  const [editandoModuloId, setEditandoModuloId] = useState(null);
   const [formModulo, setFormModulo] = useState(vacioModulo);
   const [guardando, setGuardando] = useState(false);
 
   const [habitacionSeleccionada, setHabitacionSeleccionada] = useState(null);
   const [ocupantes, setOcupantes] = useState([]);
   const [cargandoOcupantes, setCargandoOcupantes] = useState(false);
-  const [mostrarAgregarOcupante, setMostrarAgregarOcupante] = useState(false);
-  const [formOcupante, setFormOcupante] = useState(vacioOcupante);
-  const [precioHotelModulo, setPrecioHotelModulo] = useState(null); // precio real (eventos_costos) del módulo de la habitación actual
+  const [precioHotelModulo, setPrecioHotelModulo] = useState(null);
+
+  const [mostrarFormTitular, setMostrarFormTitular] = useState(false);
+  const [formTitular, setFormTitular] = useState(vacioTitular);
+  const [mostrarFormAdicional, setMostrarFormAdicional] = useState(false);
+  const [formAdicional, setFormAdicional] = useState(vacioAdicional);
   const [busquedaOcupante, setBusquedaOcupante] = useState('');
   const [resultadosBusqueda, setResultadosBusqueda] = useState([]);
   const [buscandoOcupante, setBuscandoOcupante] = useState(false);
   const [guardandoOcupante, setGuardandoOcupante] = useState(false);
 
   const [confirmacion, setConfirmacion] = useState(null);
-  const [avisoAsignacion, setAvisoAsignacion] = useState(null); // string | null — mensaje del modal
+  const [avisoAsignacion, setAvisoAsignacion] = useState(null);
   function pedirConfirmacion({ mensaje, textoConfirmar = 'Eliminar', onConfirmar }) {
     setConfirmacion({ mensaje, textoConfirmar, onConfirmar });
   }
 
-  const [bloqueando, setBloqueando] = useState(null); // { habitacion, mensaje } | null
+  const [bloqueando, setBloqueando] = useState(null);
   const [guardandoBloqueo, setGuardandoBloqueo] = useState(false);
+
+  function mostrarAviso(texto) {
+    setAviso(texto);
+    setTimeout(() => setAviso(null), 3000);
+  }
 
   useEffect(() => {
     api.get('/eventos')
@@ -72,7 +87,7 @@ export default function AdminHabitaciones() {
   }, []);
 
   async function cargarTodo() {
-    if (!eventoActual) return;
+    if (!eventoActual) return null;
     setCargando(true);
     setError('');
     try {
@@ -82,8 +97,10 @@ export default function AdminHabitaciones() {
       ]);
       setModulos(rModulos.data);
       setHabitaciones(rHabitaciones.data);
+      return rHabitaciones.data;
     } catch (err) {
       setError(mensajeError(err));
+      return null;
     } finally {
       setCargando(false);
     }
@@ -91,33 +108,25 @@ export default function AdminHabitaciones() {
 
   useEffect(() => { cargarTodo(); }, [eventoActual]);
 
-  // --- Módulos ---
+  // --- Módulos (catálogo, sin cambios de fondo respecto a antes) ---
   function abrirNuevoModulo() {
     setFormModulo(vacioModulo);
     setEditandoModuloId('nuevo');
     setVista('formularioModulo');
   }
-
   function abrirEditarModulo(m) {
     setFormModulo({ nombre: m.nombre, precio_por_persona: m.precio_por_persona ?? '', notas: m.notas || '' });
     setEditandoModuloId(m.id);
     setVista('formularioModulo');
   }
-
   async function guardarModulo() {
-    if (!formModulo.nombre) {
-      setError('El nombre del módulo es obligatorio.');
-      return;
-    }
+    if (!formModulo.nombre) { setError('El nombre del módulo es obligatorio.'); return; }
     setGuardando(true);
     setError('');
     try {
       const payload = { ...formModulo, precio_por_persona: formModulo.precio_por_persona || null };
-      if (editandoModuloId === 'nuevo') {
-        await api.post('/admin/modulos', payload);
-      } else {
-        await api.put(`/admin/modulos/${editandoModuloId}`, payload);
-      }
+      if (editandoModuloId === 'nuevo') await api.post('/admin/modulos', payload);
+      else await api.put(`/admin/modulos/${editandoModuloId}`, payload);
       setVista('lista');
       cargarTodo();
     } catch (err) {
@@ -126,19 +135,14 @@ export default function AdminHabitaciones() {
       setGuardando(false);
     }
   }
-
   function eliminarModulo(m) {
     pedirConfirmacion({
       mensaje: `Se eliminará el módulo "${m.nombre}". Las habitaciones que estaban en él NO se borran — quedan sin módulo asignado.`,
       textoConfirmar: 'Sí, eliminar',
       onConfirmar: async () => {
         setError('');
-        try {
-          await api.delete(`/admin/modulos/${m.id}`);
-          cargarTodo();
-        } catch (err) {
-          setError(mensajeError(err));
-        }
+        try { await api.delete(`/admin/modulos/${m.id}`); cargarTodo(); }
+        catch (err) { setError(mensajeError(err)); }
       },
     });
   }
@@ -149,13 +153,11 @@ export default function AdminHabitaciones() {
     setEditandoHabitacionId('nueva');
     setVista('formularioHabitacion');
   }
-
   function abrirEditarHabitacion(h) {
     setFormHabitacion({ numero: h.numero, capacidad: h.capacidad, notas: h.notas || '', modulo_id: h.modulo_id || '' });
     setEditandoHabitacionId(h.id);
     setVista('formularioHabitacion');
   }
-
   async function guardarHabitacion() {
     if (!formHabitacion.numero || !formHabitacion.capacidad || Number(formHabitacion.capacidad) < 1) {
       setError('El número y la capacidad (mínimo 1) son obligatorios.');
@@ -165,11 +167,8 @@ export default function AdminHabitaciones() {
     setError('');
     try {
       const payload = { ...formHabitacion, capacidad: Number(formHabitacion.capacidad), modulo_id: formHabitacion.modulo_id || null };
-      if (editandoHabitacionId === 'nueva') {
-        await api.post('/admin/habitaciones', payload);
-      } else {
-        await api.put(`/admin/habitaciones/${editandoHabitacionId}`, payload);
-      }
+      if (editandoHabitacionId === 'nueva') await api.post('/admin/habitaciones', payload);
+      else await api.put(`/admin/habitaciones/${editandoHabitacionId}`, payload);
       setVista('lista');
       cargarTodo();
     } catch (err) {
@@ -178,36 +177,24 @@ export default function AdminHabitaciones() {
       setGuardando(false);
     }
   }
-
   function eliminarHabitacion(h) {
     pedirConfirmacion({
       mensaje: `Se eliminará la habitación "${h.numero}" del catálogo por completo, junto con su historial de ocupantes de TODOS los eventos. Esta acción no se puede deshacer.`,
       textoConfirmar: 'Sí, eliminar',
       onConfirmar: async () => {
         setError('');
-        try {
-          await api.delete(`/admin/habitaciones/${h.id}`);
-          cargarTodo();
-        } catch (err) {
-          setError(mensajeError(err));
-        }
+        try { await api.delete(`/admin/habitaciones/${h.id}`); cargarTodo(); }
+        catch (err) { setError(mensajeError(err)); }
       },
     });
   }
 
-  // --- Bloqueo/reserva de una habitación (por evento) ---
-  // No pasa por "modo edición" a propósito: es una acción del día a día
-  // (apartar un cuarto para alguien antes de que llegue su depósito), no
-  // un cambio estructural del catálogo.
+  // --- Bloqueo/reserva de una habitación ---
   function abrirBloquear(h) {
     setBloqueando({ habitacion: h, nombre: '', numero_transferencia: '', es_reserva_seguridad: false });
   }
-
   async function confirmarBloqueo() {
-    if (!bloqueando.nombre.trim()) {
-      setError('El nombre es obligatorio.');
-      return;
-    }
+    if (!bloqueando.nombre.trim()) { setError('El nombre es obligatorio.'); return; }
     if (!bloqueando.es_reserva_seguridad && !bloqueando.numero_transferencia.trim()) {
       setError('El número de transferencia bancaria es obligatorio (o marca "Reservación de seguridad" si todavía no hay depósito).');
       return;
@@ -222,6 +209,8 @@ export default function AdminHabitaciones() {
         es_reserva_seguridad: bloqueando.es_reserva_seguridad,
       });
       setBloqueando(null);
+      setVista('lista');
+      mostrarAviso(`Habitación ${bloqueando.habitacion.numero} bloqueada correctamente`);
       cargarTodo();
     } catch (err) {
       setError(mensajeError(err));
@@ -229,7 +218,6 @@ export default function AdminHabitaciones() {
       setGuardandoBloqueo(false);
     }
   }
-
   function desbloquearHabitacion(h) {
     pedirConfirmacion({
       mensaje: `Se desbloqueará la habitación "${h.numero}" y quedará disponible para el público en general.`,
@@ -238,70 +226,69 @@ export default function AdminHabitaciones() {
         setError('');
         try {
           await api.delete(`/admin/habitaciones/${h.id}/reservar`, { params: { evento_id: eventoActual.id } });
+          setVista('lista');
+          mostrarAviso(`Habitación ${h.numero} desbloqueada`);
           cargarTodo();
-        } catch (err) {
-          setError(mensajeError(err));
-        }
+        } catch (err) { setError(mensajeError(err)); }
       },
     });
   }
 
-  // --- Ocupantes de una habitación ---
+  // --- Detalle de una habitación (modal) ---
   async function abrirDetalle(h) {
     setHabitacionSeleccionada(h);
     setVista('detalle');
-    setMostrarAgregarOcupante(false);
+    setMostrarFormTitular(false);
+    setMostrarFormAdicional(false);
     setCargandoOcupantes(true);
     setError('');
     try {
       const { data } = await api.get(`/admin/habitaciones/${h.id}/ocupantes`, { params: { evento_id: eventoActual.id } });
       setOcupantes(data);
+      const { data: costos } = await api.get(`/admin/eventos/${eventoActual.id}/costos`);
+      const costoModulo = costos.find((c) => c.concepto === 'Hotel' && c.modulo_id === h.modulo_id);
+      setPrecioHotelModulo(costoModulo ? Number(costoModulo.monto) : null);
     } catch (err) {
       setError(mensajeError(err));
     } finally {
       setCargandoOcupantes(false);
     }
   }
-
-  async function recargarOcupantes() {
+  async function recargarDetalle() {
     const { data } = await api.get(`/admin/habitaciones/${habitacionSeleccionada.id}/ocupantes`, { params: { evento_id: eventoActual.id } });
     setOcupantes(data);
-    cargarTodo(); // refresca nombres/estado en la tabla de fondo
-  }
-
-  async function abrirAgregarOcupante() {
-    setBusquedaOcupante('');
-    setResultadosBusqueda([]);
-    setMostrarAgregarOcupante(true);
-    // El monto ya no se escribe a mano — se auto-llena con el precio real
-    // configurado para este módulo en "Aquí se controla el ingreso por
-    // persona de las habitaciones" (Entradas & Salidas), no con el precio
-    // de referencia que se ve en Módulos.
-    try {
-      const { data } = await api.get(`/admin/eventos/${eventoActual.id}/costos`);
-      const costoModulo = data.find((c) => c.concepto === 'Hotel' && c.modulo_id === habitacionSeleccionada.modulo_id);
-      const precio = costoModulo ? Number(costoModulo.monto) : null;
-      setPrecioHotelModulo(precio);
-      // Si esta habitación viene de una reservación de seguridad, nunca
-      // hubo depósito por transferencia — el cobro real solo puede ser en
-      // efectivo, así que se preselecciona y ya no se deja cambiar.
-      const metodoForzado = habitacionSeleccionada.es_reserva_seguridad ? 'efectivo' : '';
-      setFormOcupante({ ...vacioOcupante, monto: precio !== null ? String(precio) : '', metodo_pago: metodoForzado });
-    } catch (err) {
-      setPrecioHotelModulo(null);
-      setFormOcupante(vacioOcupante);
+    const frescas = await cargarTodo();
+    if (frescas) {
+      const actualizada = frescas.find((x) => x.id === habitacionSeleccionada.id);
+      if (actualizada) setHabitacionSeleccionada(actualizada);
     }
   }
 
-  async function buscarOcupante(e) {
+  function abrirFormTitular() {
+    setBusquedaOcupante('');
+    setResultadosBusqueda([]);
+    setFormTitular({
+      ...vacioTitular,
+      metodo_pago: habitacionSeleccionada.es_reserva_seguridad ? 'efectivo' : '',
+    });
+    setMostrarFormTitular(true);
+  }
+  function abrirFormAdicional() {
+    setBusquedaOcupante('');
+    setResultadosBusqueda([]);
+    setFormAdicional(vacioAdicional);
+    setMostrarFormAdicional(true);
+  }
+
+  async function buscarOcupante(tipoOcupante, e) {
     e.preventDefault();
     if (!busquedaOcupante) return;
     setBuscandoOcupante(true);
     setError('');
     try {
-      const ruta = formOcupante.tipo_ocupante === 'participante' ? '/admin/participantes' : '/admin/saelistas';
+      const ruta = tipoOcupante === 'participante' ? '/admin/participantes' : '/admin/saelistas';
       const { data } = await api.get(ruta, { params: { buscar: busquedaOcupante } });
-      const lista = formOcupante.tipo_ocupante === 'participante' ? data.participantes : data;
+      const lista = tipoOcupante === 'participante' ? data.participantes : data;
       setResultadosBusqueda(lista || []);
     } catch (err) {
       setError(mensajeError(err));
@@ -310,27 +297,49 @@ export default function AdminHabitaciones() {
     }
   }
 
-  async function guardarOcupante() {
-    if (!formOcupante.seleccionado) {
-      setError('Selecciona a la persona que vas a asignar a la habitación.');
+  async function guardarTitular() {
+    if (!formTitular.seleccionado) { setError('Selecciona a la persona que va a ser el titular.'); return; }
+    if (!formTitular.metodo_pago) { setError('Selecciona el método de pago.'); return; }
+    if (formTitular.metodo_pago === 'transferencia' && !formTitular.numero_transferencia.trim()) {
+      setError('La referencia bancaria es obligatoria cuando el pago es por transferencia.');
       return;
     }
     setGuardandoOcupante(true);
     setError('');
     try {
-      await api.post(`/admin/habitaciones/${habitacionSeleccionada.id}/ocupantes`, {
+      await api.post(`/admin/habitaciones/${habitacionSeleccionada.id}/titular`, {
         evento_id: eventoActual.id,
-        tipo_ocupante: formOcupante.tipo_ocupante,
-        participante_id: formOcupante.tipo_ocupante === 'participante' ? formOcupante.seleccionado.id : null,
-        saelista_id: formOcupante.tipo_ocupante === 'saelista' ? formOcupante.seleccionado.id : null,
-        monto: formOcupante.monto || null,
-        metodo_pago: formOcupante.metodo_pago || null,
-        banco_o_recibo: formOcupante.banco_o_recibo,
-        observaciones: formOcupante.observaciones,
+        tipo_ocupante: formTitular.tipo_ocupante,
+        participante_id: formTitular.tipo_ocupante === 'participante' ? formTitular.seleccionado.id : null,
+        saelista_id: formTitular.tipo_ocupante === 'saelista' ? formTitular.seleccionado.id : null,
+        nombre_titular: formTitular.seleccionado.nombre_completo,
+        metodo_pago: formTitular.metodo_pago,
+        numero_transferencia: formTitular.numero_transferencia,
+        observaciones: formTitular.observaciones,
       });
-      setMostrarAgregarOcupante(false);
-      await cargarTodo(); // refresca la lista de módulos/habitaciones antes de volver
-      setVista('lista');
+      setMostrarFormTitular(false);
+      mostrarAviso(`Habitación ${habitacionSeleccionada.numero} guardada correctamente`);
+      await recargarDetalle();
+    } catch (err) {
+      setAvisoAsignacion(mensajeError(err));
+    } finally {
+      setGuardandoOcupante(false);
+    }
+  }
+
+  async function guardarAdicional() {
+    if (!formAdicional.seleccionado) { setError('Selecciona a la persona que vas a agregar.'); return; }
+    setGuardandoOcupante(true);
+    setError('');
+    try {
+      await api.post(`/admin/habitaciones/${habitacionSeleccionada.id}/ocupantes-adicionales`, {
+        evento_id: eventoActual.id,
+        tipo_ocupante: formAdicional.tipo_ocupante,
+        participante_id: formAdicional.tipo_ocupante === 'participante' ? formAdicional.seleccionado.id : null,
+        saelista_id: formAdicional.tipo_ocupante === 'saelista' ? formAdicional.seleccionado.id : null,
+      });
+      setMostrarFormAdicional(false);
+      await recargarDetalle();
     } catch (err) {
       setAvisoAsignacion(mensajeError(err));
     } finally {
@@ -346,20 +355,48 @@ export default function AdminHabitaciones() {
         setError('');
         try {
           await api.delete(`/admin/habitacion-ocupantes/${ocupante.id}`);
-          recargarOcupantes();
-        } catch (err) {
-          setError(mensajeError(err));
-        }
+          await recargarDetalle();
+        } catch (err) { setError(mensajeError(err)); }
       },
     });
   }
 
-  // Agrupa habitaciones por módulo (las que no tienen módulo van al final, "Sin módulo")
-  const gruposModulo = modulos.map((m) => ({
-    modulo: m,
-    habitaciones: habitaciones.filter((h) => h.modulo_id === m.id),
-  }));
-  const sinModulo = habitaciones.filter((h) => !h.modulo_id);
+  // --- Indicadores, filtros, búsqueda y paginación ---
+  const totalHabitaciones = habitaciones.length;
+  // "Ocupadas" aquí significa "no disponible al público" — incluye
+  // OCUPADA (con titular real), BLOQUEADA y SEGURIDAD, ya que ninguna
+  // de las tres se le puede ofrecer a alguien nuevo en este momento.
+  const ocupadas = habitaciones.filter((h) => h.estado !== 'DISPONIBLE').length;
+  const bloqueadas = habitaciones.filter((h) => h.estado === 'BLOQUEADA').length;
+  const seguridadActivas = habitaciones.filter((h) => h.estado === 'SEGURIDAD').length;
+  const totalIngresado = habitaciones.reduce((suma, h) => suma + (h.reserva_monto ? Number(h.reserva_monto) : 0), 0);
+
+  const disponibilidadPorModulo = modulos.map((m) => {
+    const delModulo = habitaciones.filter((h) => h.modulo_id === m.id);
+    const disponibles = delModulo.filter((h) => h.estado === 'DISPONIBLE').length;
+    return { modulo: m, disponibles, total: delModulo.length };
+  });
+
+  const habitacionesFiltradas = useMemo(() => {
+    let lista = habitaciones;
+    if (soloSinCobro) lista = lista.filter((h) => h.sin_cobro);
+    if (filtroModulo === 'seguridad') lista = lista.filter((h) => h.es_reserva_seguridad || h.estado === 'SEGURIDAD');
+    else if (filtroModulo !== 'todas') lista = lista.filter((h) => String(h.modulo_id) === String(filtroModulo));
+    if (busqueda.trim()) {
+      const q = busqueda.trim().toLowerCase();
+      lista = lista.filter((h) => h.numero.toLowerCase().includes(q));
+    }
+    return lista;
+  }, [habitaciones, filtroModulo, busqueda, soloSinCobro]);
+
+  useEffect(() => { setPagina(1); }, [filtroModulo, busqueda, soloSinCobro]);
+
+  const totalPaginas = Math.max(1, Math.ceil(habitacionesFiltradas.length / POR_PAGINA));
+  const habitacionesPagina = habitacionesFiltradas.slice((pagina - 1) * POR_PAGINA, pagina * POR_PAGINA);
+
+  if (!eventoActual && !cargando) {
+    return <p className="mt-6 text-sm text-ink/40">No hay un evento SAEL marcado como actual/abierto en este momento.</p>;
+  }
 
   return (
     <div>
@@ -372,25 +409,16 @@ export default function AdminHabitaciones() {
                 onClick={() => puedeEditar && setModoEdicion((m) => !m)}
                 disabled={!puedeEditar}
                 className={`rounded-full px-4 py-2 text-sm font-semibold transition ${
-                  !puedeEditar
-                    ? 'cursor-not-allowed bg-ink/5 text-ink/30'
+                  !puedeEditar ? 'cursor-not-allowed bg-ink/5 text-ink/30'
                     : modoEdicion ? 'bg-[#007334] text-white hover:bg-[#005c29]' : 'border border-ink/20 text-ink/70 hover:bg-ink/5'
                 }`}
               >
                 {!puedeEditar ? '🔒 Solo consulta' : modoEdicion ? '🔓 Edición activada' : '🔒 Activar edición'}
               </button>
-              <button
-                onClick={abrirNuevoModulo}
-                disabled={!modoEdicion}
-                className="rounded-full border border-ink/20 px-5 py-2 text-sm font-semibold text-ink/70 hover:bg-ink/5 disabled:cursor-not-allowed disabled:opacity-40"
-              >
+              <button onClick={abrirNuevoModulo} disabled={!modoEdicion} className="rounded-full border border-ink/20 px-5 py-2 text-sm font-semibold text-ink/70 hover:bg-ink/5 disabled:cursor-not-allowed disabled:opacity-40">
                 + Nuevo módulo
               </button>
-              <button
-                onClick={() => abrirNuevaHabitacion(null)}
-                disabled={!modoEdicion}
-                className="rounded-full bg-ember/10 px-5 py-2 text-sm font-semibold text-ember hover:bg-ember/20 disabled:cursor-not-allowed disabled:opacity-40"
-              >
+              <button onClick={() => abrirNuevaHabitacion(null)} disabled={!modoEdicion} className="rounded-full bg-ember/10 px-5 py-2 text-sm font-semibold text-ember hover:bg-ember/20 disabled:cursor-not-allowed disabled:opacity-40">
                 + Nueva habitación
               </button>
             </div>
@@ -405,51 +433,137 @@ export default function AdminHabitaciones() {
 
       {error && <p className="mt-4 rounded-lg bg-ember/10 p-3 text-sm text-ember">{error}</p>}
 
-      {!eventoActual && !cargando && (
-        <p className="mt-6 text-sm text-ink/40">No hay un evento SAEL marcado como actual/abierto en este momento.</p>
-      )}
-
       {vista === 'lista' && eventoActual && (
         cargando ? <p className="mt-6 text-ink/40">Cargando…</p> : (
           <div className="mt-4 space-y-6">
-            {modulos.length === 0 && sinModulo.length === 0 && (
-              <p className="text-sm text-ink/40">Sin módulos ni habitaciones todavía. Empieza creando un módulo.</p>
-            )}
 
-            {gruposModulo.map(({ modulo, habitaciones: habs }) => (
-              <TablaModulo
-                key={modulo.id}
-                titulo={`${modulo.nombre}${modulo.precio_por_persona ? ` (L.${modulo.precio_por_persona})` : ''}`}
-                habitaciones={habs}
-                modoEdicion={modoEdicion}
-                expandido={!!expandidos[modulo.id]}
-                onToggleExpandido={() => alternarExpandido(modulo.id)}
-                onEditarModulo={() => abrirEditarModulo(modulo)}
-                onEliminarModulo={() => eliminarModulo(modulo)}
-                onNuevaHabitacion={() => abrirNuevaHabitacion(modulo.id)}
-                onVerHabitacion={abrirDetalle}
-                onEditarHabitacion={abrirEditarHabitacion}
-                onEliminarHabitacion={eliminarHabitacion}
-                onBloquear={abrirBloquear}
-                onDesbloquear={desbloquearHabitacion}
-              />
-            ))}
+            {/* Leyenda de estados, centrada arriba */}
+            <div className="flex flex-wrap justify-center gap-5 px-1 text-xs">
+              <span className="text-amber-600">
+                🔒 <strong>Bloqueada</strong> <span className="text-ink/50">— apartada con transferencia, cuenta en ingresos de inmediato</span>
+              </span>
+              <span className="text-[#0F7173]">
+                🛡️ <strong>Seguridad</strong> <span className="text-ink/50">— apartada sin depósito, no cuenta hasta asignar a alguien real</span>
+              </span>
+            </div>
 
-            {sinModulo.length > 0 && (
-              <TablaModulo
-                titulo="Sin módulo asignado"
-                habitaciones={sinModulo}
-                modoEdicion={modoEdicion}
-                expandido={!!expandidos['sin-modulo']}
-                onToggleExpandido={() => alternarExpandido('sin-modulo')}
-                onNuevaHabitacion={() => abrirNuevaHabitacion(null)}
-                onVerHabitacion={abrirDetalle}
-                onEditarHabitacion={abrirEditarHabitacion}
-                onEliminarHabitacion={eliminarHabitacion}
-                onBloquear={abrirBloquear}
-                onDesbloquear={desbloquearHabitacion}
-              />
-            )}
+            {/* Disponibilidad por módulo + indicadores, lado a lado en pantallas grandes */}
+            <div className="grid grid-cols-1 items-start gap-3 lg:grid-cols-[1.3fr_1fr]">
+              {disponibilidadPorModulo.length > 0 && (
+                <div className="rounded-2xl border border-ink/10 bg-white p-4 shadow-sm">
+                  <p className="mb-3 text-sm font-semibold text-ink">Disponibilidad por módulo</p>
+                  <div className="space-y-2">
+                    {disponibilidadPorModulo.map(({ modulo, disponibles, total }) => {
+                      const color = disponibles <= 2 ? 'text-ember' : disponibles <= 4 ? 'text-amber-600' : 'text-[#007334]';
+                      return (
+                        <div key={modulo.id} className="flex items-center justify-between text-sm">
+                          <span className="text-ink/70">{modulo.nombre}{modulo.precio_por_persona ? ` · L.${modulo.precio_por_persona}` : ''}</span>
+                          <span className={`font-semibold ${color}`}>{disponibles}/{total} disponibles</span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              <div className="grid grid-cols-2 gap-2">
+                <div className="flex flex-col items-center justify-center rounded-xl border-t-2 border-[#0F7173] bg-white px-2 py-2 text-center shadow-sm">
+                  <p className="text-sm">🚪</p>
+                  <p className="text-[10px] leading-tight text-ink/50">Habitaciones ocupadas</p>
+                  <p className="text-lg font-bold text-[#0F7173]">{ocupadas}/{totalHabitaciones}</p>
+                </div>
+                <div className="flex flex-col items-center justify-center rounded-xl border-t-2 border-[#007334] bg-white px-2 py-2 text-center shadow-sm">
+                  <p className="text-sm">💰</p>
+                  <p className="text-[10px] leading-tight text-ink/50">Total ingresado</p>
+                  <p className="text-lg font-bold text-[#007334]">L. {totalIngresado.toLocaleString('es-HN')}</p>
+                </div>
+                <div className="flex flex-col items-center justify-center rounded-xl border-t-2 border-amber-500 bg-white px-2 py-2 text-center shadow-sm">
+                  <p className="text-sm">🔒</p>
+                  <p className="text-[10px] leading-tight text-ink/50">Habitaciones bloqueadas</p>
+                  <p className="text-lg font-bold text-amber-600">{bloqueadas}</p>
+                </div>
+                <div className="flex flex-col items-center justify-center rounded-xl border-t-2 border-[#0F7173] bg-white px-2 py-2 text-center shadow-sm">
+                  <p className="text-sm">🛡️</p>
+                  <p className="text-[10px] leading-tight text-ink/50">Reservadas por seguridad</p>
+                  <p className="text-lg font-bold text-[#0F7173]">{seguridadActivas}</p>
+                </div>
+              </div>
+            </div>
+
+            {/* Filtros por módulo + seguridad */}
+            <div>
+              <p className="mb-3 text-sm font-semibold text-ink">Habitaciones</p>
+              <div className="mb-3 flex flex-wrap gap-2">
+                <button onClick={() => setFiltroModulo('todas')} className={`rounded-full px-3 py-1.5 text-xs font-semibold ${filtroModulo === 'todas' ? 'bg-[#0F7173] text-white' : 'border border-ink/15 text-ink/70 hover:bg-ink/5'}`}>Todas</button>
+                {modulos.map((m) => (
+                  <button
+                    key={m.id}
+                    onClick={() => setFiltroModulo(m.id)}
+                    className={`rounded-full px-3 py-1.5 text-xs font-semibold ${String(filtroModulo) === String(m.id) ? 'bg-[#0F7173] text-white' : 'border border-ink/15 text-ink/70 hover:bg-ink/5'}`}
+                  >
+                    {m.nombre}{m.precio_por_persona ? ` · L.${m.precio_por_persona}` : ''}
+                  </button>
+                ))}
+                <button onClick={() => setFiltroModulo('seguridad')} className={`rounded-full px-3 py-1.5 text-xs font-semibold ${filtroModulo === 'seguridad' ? 'bg-[#0F7173] text-white' : 'border border-ink/15 text-ink/70 hover:bg-ink/5'}`}>
+                  🛡️ Seguridad
+                </button>
+              </div>
+
+              {/* Buscador + paginación */}
+              <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+                <input
+                  type="text" value={busqueda} onChange={(e) => setBusqueda(e.target.value)}
+                  placeholder="Buscar habitación" className={`${claseInput} sm:w-1/2`}
+                />
+                <div className="flex items-center gap-1">
+                  <button onClick={() => setPagina((p) => Math.max(1, p - 1))} disabled={pagina === 1} className="rounded-full border border-ink/15 px-2 py-1 text-xs disabled:opacity-30">‹</button>
+                  {Array.from({ length: totalPaginas }, (_, i) => i + 1).map((n) => (
+                    <button
+                      key={n} onClick={() => setPagina(n)}
+                      className={`rounded-full px-2.5 py-1 text-xs font-semibold ${n === pagina ? 'bg-[#0F7173] text-white' : 'border border-ink/15 text-ink/70 hover:bg-ink/5'}`}
+                    >
+                      {n}
+                    </button>
+                  ))}
+                  <button onClick={() => setPagina((p) => Math.min(totalPaginas, p + 1))} disabled={pagina === totalPaginas} className="rounded-full border border-ink/15 px-2 py-1 text-xs disabled:opacity-30">›</button>
+                </div>
+              </div>
+
+              {/* Grid de tarjetas */}
+              {habitacionesPagina.length === 0 ? (
+                <p className="py-6 text-center text-sm text-ink/40">Sin habitaciones que coincidan.</p>
+              ) : (
+                <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
+                  {habitacionesPagina.map((h) => {
+                    const estilo = ESTILO_ESTADO[h.estado];
+                    return (
+                      <button
+                        key={h.id}
+                        onClick={() => abrirDetalle(h)}
+                        className={`rounded-xl border border-ink/10 border-l-4 ${estilo.borde} ${estilo.fondo} p-3 text-left shadow-sm transition hover:shadow`}
+                      >
+                        <div className="flex items-center justify-between">
+                          <span className="text-lg">{h.estado === 'SEGURIDAD' ? '🛡️' : h.estado === 'BLOQUEADA' ? '🔒' : '🛏️'}</span>
+                        </div>
+                        <p className="mt-1.5 text-sm font-bold text-ink">N.° {h.numero}</p>
+                        <p className="text-[11px] text-ink/50">
+                          {h.modulo_nombre || 'Sin módulo'}{h.modulo_precio ? ` · L.${h.modulo_precio}` : ''}
+                        </p>
+                        <p className={`mt-1 text-xs ${h.titular || h.nombre_reservado ? 'font-semibold text-ink' : 'italic text-ink/40'}`}>
+                          {h.titular || h.nombre_reservado || 'Sin ocupantes'}
+                        </p>
+                        <span className={`mt-2 inline-block rounded-full px-2 py-0.5 text-[10px] font-semibold ${estilo.badge}`}>
+                          {estilo.texto}{h.sin_cobro ? ' · sin cobro' : ''}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+              <p className="mt-3 text-xs text-ink/40">
+                Mostrando {habitacionesFiltradas.length === 0 ? 0 : (pagina - 1) * POR_PAGINA + 1}–{Math.min(pagina * POR_PAGINA, habitacionesFiltradas.length)} de {habitacionesFiltradas.length} habitaciones
+              </p>
+            </div>
           </div>
         )
       )}
@@ -463,7 +577,7 @@ export default function AdminHabitaciones() {
               <input type="text" value={formModulo.nombre} onChange={(e) => setFormModulo((f) => ({ ...f, nombre: e.target.value }))} className={claseInput} placeholder="Ej. Módulo 4: Planta Baja" />
             </label>
             <label>
-              <span className="mb-1 block text-xs font-semibold text-ink/60">Precio por persona (L.)</span>
+              <span className="mb-1 block text-xs font-semibold text-ink/60">Precio por habitación (L.)</span>
               <input type="number" min="0" step="0.01" value={formModulo.precio_por_persona} onChange={(e) => setFormModulo((f) => ({ ...f, precio_por_persona: e.target.value }))} className={claseInput} />
             </label>
             <label>
@@ -513,158 +627,134 @@ export default function AdminHabitaciones() {
         </div>
       )}
 
+      {/* --- Modal de detalle de habitación --- */}
       {vista === 'detalle' && habitacionSeleccionada && (
-        <div className="mx-auto mt-4 max-w-2xl rounded-2xl border border-ink/10 bg-white p-6 shadow-sm">
-          <div className="flex items-center justify-between">
-            <div>
+        <div className="fixed inset-0 z-40 flex items-center justify-center bg-ink/40 px-4">
+          <div className="max-h-[90vh] w-full max-w-md overflow-y-auto rounded-2xl bg-white p-6 shadow-lg">
+            <div className="flex items-center justify-between">
               <h2 className="font-display text-lg font-bold text-ink">Habitación {habitacionSeleccionada.numero}</h2>
-              <p className="text-xs text-ink/50">Capacidad: {habitacionSeleccionada.capacidad} · Evento: {eventoActual.nombre}</p>
+              <button onClick={() => setVista('lista')} className="text-ink/40 hover:text-ink">✕</button>
             </div>
-            <button onClick={() => setVista('lista')} className="rounded-full bg-night/10 px-4 py-1.5 text-sm font-semibold text-night hover:bg-night/20">Volver</button>
-          </div>
+            {error && <p className="mt-2 rounded-lg bg-ember/10 p-2 text-xs text-ember">{error}</p>}
+            <p className="text-xs text-ink/50">
+              {habitacionSeleccionada.modulo_nombre || 'Sin módulo'}
+              {habitacionSeleccionada.modulo_precio ? ` · L.${habitacionSeleccionada.modulo_precio} por habitación` : ''}
+            </p>
 
-          {cargandoOcupantes ? <p className="mt-6 text-ink/40">Cargando…</p> : (
-            <div className="mt-4 space-y-2">
-              {ocupantes.length === 0 && <p className="text-sm text-ink/40">Nadie asignado todavía a esta habitación en este evento.</p>}
-              {ocupantes.map((o) => (
-                <div key={o.id} className="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-ink/5 px-3 py-2 text-sm">
-                  <div>
-                    <p className="font-semibold text-ink">
-                      {o.nombre_completo}
-                      <span className="ml-2 rounded-full bg-night/10 px-2 py-0.5 text-[10px] font-semibold uppercase text-night">{o.tipo_ocupante}</span>
-                    </p>
-                    <p className="text-xs text-ink/50">
-                      {o.capitulo || 'Sin capítulo'} · {o.telefono || 'Sin teléfono'}
-                      {o.monto ? ` · L. ${o.monto}` : ''}
-                      {o.metodo_pago ? ` (${o.metodo_pago})` : ''}
-                      {o.banco_o_recibo ? ` · ${o.banco_o_recibo}` : ''}
-                      {o.observaciones ? ` · ${o.observaciones}` : ''}
-                    </p>
-                  </div>
-                  <button onClick={() => quitarOcupante(o)} className={btnEliminar}>Quitar</button>
+            {!cargandoOcupantes && (
+              <div className="mt-4 flex gap-2">
+                <div className="flex-1 rounded-lg bg-ink/5 p-2 text-center">
+                  <p className="text-[10px] text-ink/50">Capacidad</p>
+                  <p className="text-sm font-bold text-ink">{habitacionSeleccionada.capacidad}</p>
                 </div>
-              ))}
-            </div>
-          )}
-
-          {!mostrarAgregarOcupante ? (
-            ocupantes.length < habitacionSeleccionada.capacidad ? (
-              <button onClick={abrirAgregarOcupante} className="mt-4 rounded-full bg-ember/10 px-5 py-2 text-sm font-semibold text-ember hover:bg-ember/20">
-                + Agregar ocupante
-              </button>
-            ) : (
-              <p className="mt-4 text-xs text-ink/40">Esta habitación ya alcanzó su capacidad máxima para este evento.</p>
-            )
-          ) : (
-            <div className="mt-4 rounded-2xl border border-ink/10 p-4">
-              <div className="flex gap-2">
-                <button
-                  onClick={() => { setFormOcupante((f) => ({ ...f, tipo_ocupante: 'participante', seleccionado: null })); setResultadosBusqueda([]); }}
-                  className={`rounded-full px-4 py-1.5 text-xs font-semibold ${formOcupante.tipo_ocupante === 'participante' ? 'bg-ink text-white' : 'border border-ink/20 text-ink/70'}`}
-                >
-                  Participante
-                </button>
-                <button
-                  onClick={() => { setFormOcupante((f) => ({ ...f, tipo_ocupante: 'saelista', seleccionado: null })); setResultadosBusqueda([]); }}
-                  className={`rounded-full px-4 py-1.5 text-xs font-semibold ${formOcupante.tipo_ocupante === 'saelista' ? 'bg-ink text-white' : 'border border-ink/20 text-ink/70'}`}
-                >
-                  Saelista
-                </button>
+                <div className="flex-1 rounded-lg bg-ink/5 p-2 text-center">
+                  <p className="text-[10px] text-ink/50">Ocupados</p>
+                  <p className="text-sm font-bold text-ink">{ocupantes.length}</p>
+                </div>
+                <div className="flex-1 rounded-lg bg-ink/5 p-2 text-center">
+                  <p className="text-[10px] text-ink/50">Estado</p>
+                  <p className={`text-xs font-bold ${ESTILO_ESTADO[habitacionSeleccionada.estado]?.badge.split(' ')[1] || ''}`}>
+                    {ESTILO_ESTADO[habitacionSeleccionada.estado]?.texto || habitacionSeleccionada.estado}
+                  </p>
+                </div>
               </div>
+            )}
 
-              {!formOcupante.seleccionado ? (
-                <>
-                  <form onSubmit={buscarOcupante} className="mt-3 flex gap-2">
-                    <input
-                      type="text" value={busquedaOcupante} onChange={(e) => setBusquedaOcupante(e.target.value)}
-                      placeholder="Buscar por nombre o identificación" className={claseInput}
-                    />
-                    <button type="submit" className="shrink-0 rounded-full bg-[#007334]/10 px-4 py-2 text-xs font-semibold text-[#007334] hover:bg-[#007334]/20">
-                      {buscandoOcupante ? '...' : 'Buscar'}
-                    </button>
-                  </form>
-                  <div className="mt-2 max-h-48 space-y-1 overflow-y-auto">
-                    {resultadosBusqueda.map((p) => (
-                      <button
-                        key={p.id}
-                        onClick={() => setFormOcupante((f) => ({ ...f, seleccionado: p }))}
-                        className="block w-full rounded-lg border border-ink/10 px-3 py-2 text-left text-sm hover:border-ember/40"
-                      >
-                        <span className="font-medium text-ink">{p.nombre_completo}</span>
-                        <span className="ml-2 text-xs text-ink/50">{p.capitulo || p.dni || ''}</span>
-                      </button>
-                    ))}
-                  </div>
-                </>
-              ) : (
-                <div className="mt-3 space-y-3">
-                  <div className="flex items-center justify-between rounded-lg bg-ink/5 px-3 py-2 text-sm">
-                    <span className="font-medium text-ink">{formOcupante.seleccionado.nombre_completo}</span>
-                    <button onClick={() => setFormOcupante((f) => ({ ...f, seleccionado: null }))} className="text-xs text-ink/40 hover:text-ember hover:underline">Cambiar</button>
-                  </div>
-                  <label>
-                    <span className="mb-1 block text-xs font-semibold text-ink/60">Monto</span>
-                    <input
-                      type="number" value={formOcupante.monto} disabled
-                      className={`${claseInput} disabled:border-transparent disabled:bg-ink/5 disabled:text-ink/50`}
-                    />
-                    <span className="mt-1 block text-[11px] text-ink/40">
-                      {precioHotelModulo !== null
-                        ? 'Se toma del precio configurado para este módulo en Entradas & Salidas.'
-                        : 'Este módulo no tiene precio configurado todavía en Entradas & Salidas — configúralo ahí antes de asignar.'}
-                    </span>
-                  </label>
-                  <label>
-                    <span className="mb-1 block text-xs font-semibold text-ink/60">Método de pago</span>
-                    <select
-                      value={formOcupante.metodo_pago}
-                      disabled={habitacionSeleccionada.es_reserva_seguridad}
-                      onChange={(e) => {
-                        const nuevoMetodo = e.target.value;
-                        setFormOcupante((f) => ({
-                          ...f,
-                          metodo_pago: nuevoMetodo,
-                          // Efectivo no tiene banco ni # de recibo — se limpia
-                          // cualquier valor que hubiera quedado de antes.
-                          banco_o_recibo: nuevoMetodo === 'efectivo' ? '' : f.banco_o_recibo,
-                        }));
-                      }}
-                      className={`${claseInput} disabled:border-transparent disabled:bg-ink/5 disabled:text-ink/50`}
+            {/* Bloqueo/reserva — solo tiene sentido mientras no hay ocupantes reales */}
+            {!cargandoOcupantes && ocupantes.length === 0 && (
+              <div className="mt-3">
+                {habitacionSeleccionada.nombre_reservado ? (
+                  <div className="rounded-lg bg-ink/5 p-3 text-xs">
+                    <p className="text-ink/70">
+                      {habitacionSeleccionada.es_reserva_seguridad ? '🛡️ Reserva de seguridad' : '🔒 Bloqueada'} a nombre de{' '}
+                      <strong>{habitacionSeleccionada.nombre_reservado}</strong>
+                      {habitacionSeleccionada.numero_transferencia ? ` · Ref. ${habitacionSeleccionada.numero_transferencia}` : ''}
+                      {habitacionSeleccionada.reserva_monto ? ` · L. ${habitacionSeleccionada.reserva_monto}` : ''}
+                    </p>
+                    <button
+                      onClick={() => desbloquearHabitacion(habitacionSeleccionada)}
+                      className="mt-2 rounded-full border border-ink/20 px-3 py-1 text-xs font-semibold text-ink/70 hover:bg-ink/5"
                     >
-                      <option value="">Seleccionar…</option>
-                      <option value="efectivo">Efectivo</option>
-                      <option value="transferencia">Transferencia Bancaria (Bancos)</option>
-                    </select>
-                    {habitacionSeleccionada.es_reserva_seguridad && (
-                      <span className="mt-1 block text-[11px] text-ink/40">
-                        Esta habitación estaba en reservación de seguridad (sin depósito) — el cobro real solo puede ser en efectivo.
-                      </span>
-                    )}
-                  </label>
-                  <label>
-                    <span className="mb-1 block text-xs font-semibold text-ink/60">Banco o # de recibo (opcional)</span>
-                    <input
-                      type="text" value={formOcupante.banco_o_recibo}
-                      onChange={(e) => setFormOcupante((f) => ({ ...f, banco_o_recibo: e.target.value }))}
-                      disabled={formOcupante.metodo_pago === 'efectivo'}
-                      className={`${claseInput} disabled:border-transparent disabled:bg-ink/5 disabled:text-ink/50`}
-                    />
-                  </label>
-                  <label>
-                    <span className="mb-1 block text-xs font-semibold text-ink/60">Observaciones (opcional)</span>
-                    <input type="text" value={formOcupante.observaciones} onChange={(e) => setFormOcupante((f) => ({ ...f, observaciones: e.target.value }))} className={claseInput} />
-                  </label>
-                </div>
-              )}
-
-              <div className="mt-4 flex justify-end gap-3">
-                <button onClick={() => setMostrarAgregarOcupante(false)} className="rounded-full border border-ink/20 px-4 py-1.5 text-xs font-semibold text-ink/70 hover:bg-ink/5">Cancelar</button>
-                <button onClick={guardarOcupante} disabled={guardandoOcupante || !formOcupante.seleccionado} className="rounded-full bg-[#007334]/10 px-4 py-1.5 text-xs font-semibold text-[#007334] hover:bg-[#007334]/20 disabled:opacity-50">
-                  {guardandoOcupante ? 'Guardando…' : 'Asignar'}
-                </button>
+                      Desbloquear
+                    </button>
+                    <p className="mt-2 text-[11px] text-ink/40">
+                      Para registrar el cobro real de esta habitación, asigna al titular abajo — reemplaza este bloqueo.
+                    </p>
+                  </div>
+                ) : (
+                  <button
+                    onClick={() => abrirBloquear(habitacionSeleccionada)}
+                    className="rounded-full border border-ink/20 px-3 py-1.5 text-xs font-semibold text-ink/70 hover:bg-ink/5"
+                  >
+                    🔒 Bloquear / reservar esta habitación
+                  </button>
+                )}
               </div>
-            </div>
-          )}
+            )}
+
+            {cargandoOcupantes ? <p className="mt-6 text-ink/40">Cargando…</p> : (
+              <>
+                <p className="mt-4 mb-2 text-sm font-semibold text-ink">Ocupantes</p>
+                <div className="space-y-1.5">
+                  {ocupantes.length === 0 && <p className="text-sm text-ink/40">Nadie asignado todavía a esta habitación en este evento.</p>}
+                  {ocupantes.map((o) => (
+                    <div key={o.id} className="flex items-center justify-between rounded-lg bg-ink/5 px-3 py-2 text-sm">
+                      <span className="text-ink">
+                        {o.nombre_completo}
+                        {o.es_titular && <span className="ml-2 text-[10px] text-ink/40">· titular</span>}
+                      </span>
+                      <button onClick={() => quitarOcupante(o)} className="text-xs font-semibold text-ember hover:underline">Quitar</button>
+                    </div>
+                  ))}
+                </div>
+
+                {ocupantes.length === 0 ? (
+                  !mostrarFormTitular ? (
+                    <button onClick={abrirFormTitular} className={`mt-3 w-full ${btnEditar}`}>+ Asignar titular</button>
+                  ) : (
+                    <FormularioOcupante
+                      titulo="Asignar titular"
+                      form={formTitular} setForm={setFormTitular}
+                      busqueda={busquedaOcupante} setBusqueda={setBusquedaOcupante}
+                      resultados={resultadosBusqueda} buscando={buscandoOcupante}
+                      onBuscar={(e) => buscarOcupante(formTitular.tipo_ocupante, e)}
+                      onCancelar={() => setMostrarFormTitular(false)}
+                      onGuardar={guardarTitular}
+                      guardando={guardandoOcupante}
+                      textoGuardar="Guardar"
+                      conCobro
+                      precioHotelModulo={precioHotelModulo}
+                      esReservaSeguridad={habitacionSeleccionada.es_reserva_seguridad}
+                    />
+                  )
+                ) : (
+                  <>
+                    <p className="mt-2 text-[11px] text-ink/40">
+                      El titular es obligatorio. Agregar más ocupantes es opcional — puede hacerse ahora o después, sin costo adicional.
+                    </p>
+                    {!mostrarFormAdicional ? (
+                      ocupantes.length < habitacionSeleccionada.capacidad && (
+                        <button onClick={abrirFormAdicional} className={`mt-3 w-full ${btnEditar}`}>+ Agregar otro ocupante</button>
+                      )
+                    ) : (
+                      <FormularioOcupante
+                        titulo="Agregar ocupante"
+                        form={formAdicional} setForm={setFormAdicional}
+                        busqueda={busquedaOcupante} setBusqueda={setBusquedaOcupante}
+                        resultados={resultadosBusqueda} buscando={buscandoOcupante}
+                        onBuscar={(e) => buscarOcupante(formAdicional.tipo_ocupante, e)}
+                        onCancelar={() => setMostrarFormAdicional(false)}
+                        onGuardar={guardarAdicional}
+                        guardando={guardandoOcupante}
+                        textoGuardar="Agregar"
+                        conCobro={false}
+                      />
+                    )}
+                  </>
+                )}
+              </>
+            )}
+          </div>
         </div>
       )}
 
@@ -764,105 +854,131 @@ export default function AdminHabitaciones() {
           </div>
         </div>
       )}
+
+      {/* Aviso (toast) de confirmación al guardar — mismo patrón usado en AdminSaelistas */}
+      {aviso && (
+        <div className="fixed bottom-6 left-1/2 z-50 -translate-x-1/2 rounded-full bg-[#007334]/90 px-5 py-2.5 text-sm font-semibold text-white shadow-lg">
+          ✓ {aviso}
+        </div>
+      )}
     </div>
   );
 }
 
-// Tabla de un módulo con sus habitaciones — igual formato al mockup de Carlos:
-// # Habitación | Capacidad | Asignado | Disponibilidad
-// Colapsable (clic en el encabezado) y con los botones de gestión del
-// catálogo bloqueados salvo que modoEdicion esté activado — Asignar/
-// Gestionar ocupantes siempre queda disponible, sin bloquear.
-function TablaModulo({
-  titulo, habitaciones, modoEdicion, expandido, onToggleExpandido,
-  onEditarModulo, onEliminarModulo, onNuevaHabitacion, onVerHabitacion, onEditarHabitacion, onEliminarHabitacion,
-  onBloquear, onDesbloquear,
+// Formulario compartido para buscar/seleccionar a la persona (titular o
+// adicional). conCobro=true agrega la sección de método de pago,
+// referencia bancaria y observaciones (solo aplica al titular).
+function FormularioOcupante({
+  titulo, form, setForm, busqueda, setBusqueda, resultados, buscando, onBuscar,
+  onCancelar, onGuardar, guardando, textoGuardar, conCobro, precioHotelModulo, esReservaSeguridad,
 }) {
-  const btnCatalogoDeshabilitado = 'disabled:cursor-not-allowed disabled:opacity-40';
   return (
-    <div className="overflow-hidden rounded-2xl border border-ink/10 bg-white shadow-sm">
-      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-ink/10 bg-ink/5 px-4 py-3">
-        <button onClick={onToggleExpandido} className="flex items-center gap-2 text-left">
-          <span className="text-ink/40">{expandido ? '▾' : '▸'}</span>
-          <h3 className="font-display text-base font-bold text-ink">{titulo}</h3>
-          <span className="text-xs text-ink/40">({habitaciones.length} habitación{habitaciones.length === 1 ? '' : 'es'})</span>
-        </button>
-        <div className="flex gap-2">
-          {onEditarModulo && <button onClick={onEditarModulo} disabled={!modoEdicion} className={`${btnEditar} ${btnCatalogoDeshabilitado}`}>Editar módulo</button>}
-          {onEliminarModulo && <button onClick={onEliminarModulo} disabled={!modoEdicion} className={`${btnEliminar} ${btnCatalogoDeshabilitado}`}>Eliminar módulo</button>}
-          <button onClick={onNuevaHabitacion} disabled={!modoEdicion} className={`rounded-full border border-ink/20 px-3 py-1 text-xs font-semibold text-ink/70 hover:bg-ink/5 ${btnCatalogoDeshabilitado}`}>
-            + Habitación
-          </button>
+    <div className="mt-3 rounded-xl border border-ink/10 bg-ink/[0.02] p-3">
+      <p className="mb-2 text-xs font-semibold text-ink/60">{titulo}</p>
+
+      {!form.seleccionado ? (
+        <>
+          <div className="mb-2 flex gap-2 text-xs">
+            <button
+              onClick={() => setForm((f) => ({ ...f, tipo_ocupante: 'participante' }))}
+              className={`rounded-full px-3 py-1 font-semibold ${form.tipo_ocupante === 'participante' ? 'bg-night/10 text-night' : 'text-ink/40'}`}
+            >Participante</button>
+            <button
+              onClick={() => setForm((f) => ({ ...f, tipo_ocupante: 'saelista' }))}
+              className={`rounded-full px-3 py-1 font-semibold ${form.tipo_ocupante === 'saelista' ? 'bg-night/10 text-night' : 'text-ink/40'}`}
+            >Saelista</button>
+          </div>
+          <form onSubmit={onBuscar} className="flex gap-2">
+            <input
+              type="text" value={busqueda} onChange={(e) => setBusqueda(e.target.value)}
+              placeholder="Buscar por nombre o identificación" className={claseInput}
+            />
+            <button type="submit" className="shrink-0 rounded-full bg-[#007334]/10 px-4 py-2 text-xs font-semibold text-[#007334] hover:bg-[#007334]/20">
+              {buscando ? '...' : 'Buscar'}
+            </button>
+          </form>
+          <div className="mt-2 max-h-40 space-y-1 overflow-y-auto">
+            {resultados.map((p) => (
+              <button
+                key={p.id}
+                onClick={() => setForm((f) => ({ ...f, seleccionado: p }))}
+                className="block w-full rounded-lg border border-ink/10 px-3 py-2 text-left text-sm hover:border-ember/40"
+              >
+                <span className="font-medium text-ink">{p.nombre_completo}</span>
+                <span className="ml-2 text-xs text-ink/50">{p.capitulo || p.dni || ''}</span>
+              </button>
+            ))}
+          </div>
+        </>
+      ) : (
+        <div className="space-y-3">
+          <div className="flex items-center justify-between rounded-lg bg-ink/5 px-3 py-2 text-sm">
+            <span className="font-medium text-ink">{form.seleccionado.nombre_completo}</span>
+            <button onClick={() => setForm((f) => ({ ...f, seleccionado: null }))} className="text-xs text-ink/40 hover:text-ember hover:underline">Cambiar</button>
+          </div>
+
+          {conCobro && (
+            <>
+              <div className="rounded-lg bg-ink/5 px-3 py-2 text-sm">
+                <span className="text-ink/50">Monto de la habitación: </span>
+                <span className="font-semibold text-ink">{precioHotelModulo !== null ? `L. ${precioHotelModulo}` : 'sin precio configurado'}</span>
+              </div>
+              <label>
+                <span className="mb-1 block text-xs font-semibold text-ink/60">Método de pago</span>
+                <select
+                  value={form.metodo_pago}
+                  disabled={esReservaSeguridad}
+                  onChange={(e) => setForm((f) => ({ ...f, metodo_pago: e.target.value, numero_transferencia: e.target.value === 'efectivo' ? '' : f.numero_transferencia }))}
+                  className={`${claseInput} disabled:border-transparent disabled:bg-ink/5 disabled:text-ink/50`}
+                >
+                  <option value="">Seleccionar…</option>
+                  <option value="efectivo">Efectivo</option>
+                  <option value="transferencia">Transferencia</option>
+                </select>
+                {esReservaSeguridad && (
+                  <span className="mt-1 block text-[11px] text-ink/40">
+                    Esta habitación viene de una reservación de seguridad (sin depósito) — el cobro debe ser en efectivo.
+                  </span>
+                )}
+              </label>
+              <label>
+                <span className="mb-1 block text-xs font-semibold text-ink/60">
+                  {form.metodo_pago === 'transferencia' ? 'Transferencia Bancaria o Recibo #' : 'Referencia bancaria'}
+                </span>
+                <input
+                  type="text" value={form.numero_transferencia}
+                  onChange={(e) => setForm((f) => ({ ...f, numero_transferencia: e.target.value }))}
+                  disabled={form.metodo_pago !== 'transferencia'}
+                  placeholder={form.metodo_pago === 'transferencia' ? 'Comprobante de transferencia o número de recibo' : 'Deshabilitado con pago en efectivo'}
+                  className={`w-full rounded-lg border px-3 py-2 text-sm focus:outline-none ${
+                    form.metodo_pago === 'transferencia'
+                      ? 'border-ember/40 bg-ember/5 focus:border-ember'
+                      : 'border-transparent bg-ink/5 text-ink/50'
+                  }`}
+                />
+              </label>
+              <label>
+                <span className="mb-1 block text-xs font-semibold text-ink/60">Observaciones (opcional)</span>
+                <textarea
+                  rows={2} value={form.observaciones}
+                  onChange={(e) => setForm((f) => ({ ...f, observaciones: e.target.value }))}
+                  className={`${claseInput} resize-none`}
+                />
+              </label>
+            </>
+          )}
         </div>
-      </div>
-      {expandido && (
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="border-b border-ink/10 bg-[#0F7173]/12 text-center text-xs uppercase tracking-wide text-[#0F7173]">
-              <th className="px-4 py-2">#Habitación</th>
-              <th className="px-4 py-2">Capacidad</th>
-              <th className="px-4 py-2">Asignado</th>
-              <th className="px-4 py-2">Disponibilidad</th>
-              <th className="px-4 py-2">Reserva</th>
-              <th className="px-4 py-2"></th>
-            </tr>
-          </thead>
-          <tbody>
-            {habitaciones.length === 0 && (
-              <tr><td colSpan={6} className="px-4 py-4 text-center text-ink/40">Sin habitaciones en este módulo todavía.</td></tr>
-            )}
-            {habitaciones.map((h) => {
-              const bloqueada = h.estado === 'BLOQUEADA';
-              return (
-                <tr key={h.id} className="border-b border-ink/5 text-center last:border-0">
-                  <td className="px-4 py-3 font-semibold text-ink">{h.numero}</td>
-                  <td className="px-4 py-3 text-ink/60">{h.capacidad}</td>
-                  <td className="px-4 py-3">
-                    {bloqueada ? (
-                      <button onClick={() => onVerHabitacion(h)} className="text-left text-sm text-ink/50 italic hover:underline">
-                        {h.es_reserva_seguridad
-                          ? `🔒 ${h.nombre_reservado} · Reservación de seguridad (sin depósito)`
-                          : `🔒 ${h.nombre_reservado} · Ref. ${h.numero_transferencia}${h.reserva_monto ? ` · L. ${h.reserva_monto}` : ''}`}
-                      </button>
-                    ) : h.ocupantes === 0 ? (
-                      <button onClick={() => onVerHabitacion(h)} className="text-sm font-semibold text-ember hover:underline">
-                        + Asignar
-                      </button>
-                    ) : (
-                      <button onClick={() => onVerHabitacion(h)} className="text-left text-sm text-ink hover:underline">
-                        {h.ocupantes_detalle.map((o) => `${o.nombre} (${o.tipo === 'participante' ? 'Participante' : 'Saelista'})`).join(', ')}
-                        <span className="ml-2 text-xs text-ember">Gestionar</span>
-                      </button>
-                    )}
-                  </td>
-                  <td className="px-4 py-3">
-                    <span className={`rounded-full px-3 py-1 text-xs font-semibold uppercase tracking-wide ${
-                      h.estado === 'DISPONIBLE' ? 'bg-[#007334]/10 text-[#007334]' : h.estado === 'BLOQUEADA' ? 'bg-night/10 text-night' : 'bg-ember/10 text-ember'
-                    }`}>
-                      {h.estado}
-                    </span>
-                  </td>
-                  <td className="px-4 py-3">
-                    {bloqueada ? (
-                      <button onClick={() => onDesbloquear(h)} className="rounded-full border border-ink/20 px-3 py-1 text-xs font-semibold text-ink/70 hover:bg-ink/5">
-                        Desbloquear
-                      </button>
-                    ) : (
-                      <button onClick={() => onBloquear(h)} className="rounded-full bg-night/10 px-3 py-1 text-xs font-semibold text-night hover:bg-night/20">
-                        Bloquear
-                      </button>
-                    )}
-                  </td>
-                  <td className="px-4 py-3 whitespace-nowrap">
-                    <button onClick={() => onEditarHabitacion(h)} disabled={!modoEdicion} className={`${btnEditar} ${btnCatalogoDeshabilitado}`}>Editar</button>
-                    <button onClick={() => onEliminarHabitacion(h)} disabled={!modoEdicion} className={`ml-2 ${btnEliminar} ${btnCatalogoDeshabilitado}`}>Eliminar</button>
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
       )}
+
+      <div className="mt-3 flex justify-end gap-2">
+        <button onClick={onCancelar} className="rounded-full border border-ink/20 px-4 py-1.5 text-xs font-semibold text-ink/70 hover:bg-ink/5">Cancelar</button>
+        <button
+          onClick={onGuardar} disabled={guardando || !form.seleccionado}
+          className="rounded-full bg-[#007334]/10 px-4 py-1.5 text-xs font-semibold text-[#007334] hover:bg-[#007334]/20 disabled:opacity-50"
+        >
+          {guardando ? 'Guardando…' : textoGuardar}
+        </button>
+      </div>
     </div>
   );
 }

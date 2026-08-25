@@ -29,6 +29,7 @@ export default function AdminCatalogoCuentas() {
   const [cargando, setCargando] = useState(true);
   const [error, setError] = useState('');
   const [modoEdicion, setModoEdicion] = useState(false);
+  const [tipoActivo, setTipoActivo] = useState('ingreso'); // ingreso | egreso
 
   const [editandoId, setEditandoId] = useState(null); // id o 'nueva'
   const [form, setForm] = useState(vacio);
@@ -55,9 +56,10 @@ export default function AdminCatalogoCuentas() {
   useEffect(() => { cargar(); }, []);
 
   const plano = aplanar(arbol);
+  const planoDelTipo = plano.filter((c) => c.tipo === tipoActivo);
 
   function abrirNueva(padre) {
-    setForm({ ...vacio, cuenta_padre_id: padre ? String(padre.id) : '' });
+    setForm({ ...vacio, tipo: padre ? padre.tipo : tipoActivo, cuenta_padre_id: padre ? String(padre.id) : '' });
     setEditandoId('nueva');
   }
 
@@ -156,6 +158,27 @@ export default function AdminCatalogoCuentas() {
 
       {error && <p className="mt-4 rounded-lg bg-ember/10 p-3 text-sm text-ember">{error}</p>}
 
+      <div className="mt-4 flex gap-2">
+        <button
+          onClick={() => setTipoActivo('ingreso')}
+          className={`rounded-full px-4 py-1.5 text-xs font-semibold transition ${
+            tipoActivo === 'ingreso' ? 'bg-[#007334] text-white' : 'border border-ink/15 text-ink/70 hover:bg-ink/5'
+          }`}
+        >
+          {tipoActivo !== 'ingreso' && <span className="mr-1.5 inline-block h-2 w-2 rounded-full align-middle bg-[#007334]" />}
+          Ingresos
+        </button>
+        <button
+          onClick={() => setTipoActivo('egreso')}
+          className={`rounded-full px-4 py-1.5 text-xs font-semibold transition ${
+            tipoActivo === 'egreso' ? 'bg-ember text-white' : 'border border-ink/15 text-ink/70 hover:bg-ink/5'
+          }`}
+        >
+          {tipoActivo !== 'egreso' && <span className="mr-1.5 inline-block h-2 w-2 rounded-full align-middle bg-ember" />}
+          Egresos
+        </button>
+      </div>
+
       {cargando ? <p className="mt-6 text-ink/40">Cargando…</p> : (
         <div className="mt-4 overflow-hidden rounded-2xl border border-ink/10 bg-white shadow-sm">
           <table className="w-full text-sm">
@@ -163,25 +186,19 @@ export default function AdminCatalogoCuentas() {
               <tr className="border-b border-ink/10 bg-[#1F3464]/12 text-left text-xs uppercase tracking-wide text-[#1F3464]">
                 <th className="px-3 py-3">Código</th>
                 <th className="px-3 py-3">Cuenta</th>
-                <th className="px-3 py-3">Tipo</th>
                 <th className="px-3 py-3">Origen</th>
                 <th className="px-3 py-3"></th>
               </tr>
             </thead>
             <tbody>
-              {plano.length === 0 && (
-                <tr><td colSpan={5} className="px-4 py-6 text-center text-ink/40">Sin cuentas creadas todavía.</td></tr>
+              {planoDelTipo.length === 0 && (
+                <tr><td colSpan={4} className="px-4 py-6 text-center text-ink/40">Sin cuentas de {tipoActivo === 'ingreso' ? 'ingreso' : 'egreso'} creadas todavía.</td></tr>
               )}
-              {plano.map((c) => (
+              {planoDelTipo.map((c) => (
                 <tr key={c.id} className="border-b border-ink/5 last:border-0">
                   <td className="px-3 py-2 text-xs text-ink/50">{c.codigo}</td>
                   <td className="px-3 py-2 text-ink" style={{ paddingLeft: `${12 + c.nivel * 20}px` }}>
                     {c.nombre}
-                  </td>
-                  <td className="px-3 py-2">
-                    <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase ${c.tipo === 'ingreso' ? 'bg-[#007334]/10 text-[#007334]' : 'bg-ember/10 text-ember'}`}>
-                      {c.tipo}
-                    </span>
                   </td>
                   <td className="px-3 py-2">
                     <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase ${ORIGEN_COLOR[c.origen]}`}>

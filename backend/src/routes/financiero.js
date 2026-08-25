@@ -180,15 +180,14 @@ async function calcularControlFinanciero(evento_id, tipo) {
     );
     totalServidores = parseInt(servidores.rows[0].cant, 10);
 
-    // "Hotel" combina dos fuentes: los ocupantes reales ya asignados
-    // (habitacion_ocupantes), y los bloqueos con depósito ya capturado
-    // (habitacion_reservas) — un apartado previo con transferencia
-    // bancaria cuenta como ingreso desde que se bloquea, aunque la
-    // persona todavía no exista como Participante. Los bloqueos siempre
-    // caen en "Bancos" (transferencia), porque así es como se capturan.
-    // OJO: si más adelante alguien bloqueado se asigna también como
-    // ocupante real, ambos se sumarían — hay que desbloquear a mano
-    // cuando eso pase, para no contar el mismo depósito dos veces.
+    // "Hotel" ahora se cobra por HABITACIÓN completa, no por persona —
+    // habitacion_reservas es la única fuente del cobro (una fila por
+    // habitación por evento, gracias al UNIQUE (habitacion_id, evento_id)
+    // de esa tabla). Cubre tanto asignaciones normales de titular como
+    // bloqueos con depósito ya capturado. Las reservas de seguridad
+    // (es_reserva_seguridad = true) quedan con monto NULL a propósito y
+    // no cuentan aquí hasta que se les asigne un titular real, que es
+    // cuando su fila se actualiza con el cobro de verdad.
     //
     // Cada módulo tiene, configurada a mano en "Aquí se controla el
     // ingreso por persona de las habitaciones", una cuenta real del
@@ -210,15 +209,10 @@ async function calcularControlFinanciero(evento_id, tipo) {
     });
 
     const combinadoHotel = await pool.query(
-      `SELECT h.modulo_id, o.metodo_pago, o.monto
-       FROM habitacion_ocupantes o
-       JOIN habitaciones h ON h.id = o.habitacion_id
-       WHERE o.evento_id = $1
-       UNION ALL
-       SELECT h.modulo_id, 'transferencia' AS metodo_pago, r.monto
+      `SELECT h.modulo_id, r.metodo_pago, r.monto
        FROM habitacion_reservas r
        JOIN habitaciones h ON h.id = r.habitacion_id
-       WHERE r.evento_id = $1 AND r.monto IS NOT NULL AND r.es_reserva_seguridad = false`,
+       WHERE r.evento_id = $1 AND r.monto IS NOT NULL`,
       [evento_id]
     );
     // hotelPorCuenta = { [cuenta_id]: { cant, monto } } — se acumula
@@ -234,16 +228,15 @@ async function calcularControlFinanciero(evento_id, tipo) {
       hotelPorCuenta[cuentaId].monto += Number(r.monto || 0);
     });
 
-    // Observaciones de Hotel — solo existen en habitacion_ocupantes (las
-    // reservas de seguridad no tienen ese campo). Se agrupan por la misma
-    // cuenta real a la que ya cayó su monto.
+    // Observaciones de Hotel — ahora viven en habitacion_reservas (una por
+    // habitación, no por persona). El nombre mostrado es el que se guardó
+    // en nombre_reservado (el titular, o quien reservó en un bloqueo).
+    // Se agrupan por la misma cuenta real a la que ya cayó su monto.
     const obsHotel = await pool.query(
-      `SELECT h.modulo_id, o.metodo_pago, COALESCE(p.nombre_completo, s.nombre_completo) AS nombre, o.observaciones
-       FROM habitacion_ocupantes o
-       JOIN habitaciones h ON h.id = o.habitacion_id
-       LEFT JOIN participantes p ON p.id = o.participante_id
-       LEFT JOIN saelistas s ON s.id = o.saelista_id
-       WHERE o.evento_id = $1 AND o.observaciones IS NOT NULL AND o.observaciones != ''`,
+      `SELECT h.modulo_id, r.metodo_pago, r.nombre_reservado AS nombre, r.observaciones
+       FROM habitacion_reservas r
+       JOIN habitaciones h ON h.id = r.habitacion_id
+       WHERE r.evento_id = $1 AND r.observaciones IS NOT NULL AND r.observaciones != ''`,
       [evento_id]
     );
     obsHotel.rows.forEach((o) => {
