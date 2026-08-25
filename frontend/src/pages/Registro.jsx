@@ -137,6 +137,19 @@ function formatearHoraEs(horaHHMM) {
   return `${hora12}:${String(m).padStart(2, '0')} ${meridiano}`;
 }
 
+const MESES = [
+  'enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio',
+  'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre',
+];
+
+// Igual que en Home.jsx: nunca crear un Date() de una fecha-sin-hora
+// (ej. "2026-08-29") — se interpreta como medianoche UTC y, al mostrarla
+// en hora Honduras (UTC-6), se corre un día hacia atrás.
+function formatearFechaLarga(fechaISO) {
+  const [anio, mes, dia] = fechaISO.slice(0, 10).split('-').map(Number);
+  return `${dia} de ${MESES[mes - 1]} de ${anio}`;
+}
+
 // Mismo cálculo que hace el backend en POST /inscripciones (fecha+hora
 // límite, en hora Honduras real vía offset -06:00 explícito) — se
 // duplica aquí a propósito para poder bloquear la entrada al formulario
@@ -276,6 +289,22 @@ export default function Registro() {
     setEditando(true);
   }
 
+  // Nombre Propio: primera letra de cada palabra en mayúscula, el resto en
+  // minúscula — sin importar cómo lo haya escrito la persona (todo
+  // mayúsculas, todo minúsculas, mezclado). Se aplica solo a los campos de
+  // texto libre (nombre, capítulo, contacto de emergencia) justo antes de
+  // enviar — nunca a los que ya vienen de una lista desplegable fija.
+  function formatoNombrePropio(texto) {
+    if (!texto) return texto;
+    return texto
+      .trim()
+      .toLowerCase()
+      .split(' ')
+      .filter((palabra) => palabra.length > 0)
+      .map((palabra) => palabra.charAt(0).toUpperCase() + palabra.slice(1))
+      .join(' ');
+  }
+
   function validarEdicion() {
     if (!formEdicion.nombre_completo || !formEdicion.fecha_nacimiento || !formEdicion.estado_civil) return false;
     if (!/^\d{8}$/.test(formEdicion.telefono_movil)) return false;
@@ -295,6 +324,9 @@ export default function Registro() {
       const { data: actualizado } = await api.put(`/participantes/${participanteExistente.id}`, {
         numero_identificacion: form.dni,
         ...formEdicion,
+        nombre_completo: formatoNombrePropio(formEdicion.nombre_completo),
+        capitulo: formatoNombrePropio(formEdicion.capitulo),
+        contacto_emergencia_nombre: formatoNombrePropio(formEdicion.contacto_emergencia_nombre),
       });
       await inscribirSiHaceFalta(participanteExistente.id);
       setNombreInscrito(actualizado.nombre_completo || formEdicion.nombre_completo);
@@ -331,18 +363,18 @@ export default function Registro() {
       const { data: nuevo } = await api.post('/participantes', {
         numero_identificacion: form.dni,
         es_extranjero: form.es_extranjero,
-        nombre_completo: form.nombre_completo,
+        nombre_completo: formatoNombrePropio(form.nombre_completo),
         fecha_nacimiento: form.fecha_nacimiento,
         telefono_movil: form.telefono_movil,
         departamento: form.departamento,
         municipio: form.municipio,
-        capitulo: form.capitulo,
+        capitulo: formatoNombrePropio(form.capitulo),
         zona: form.zona,
         cargo_fihnec: form.cargo_fihnec,
         estado_civil: form.estado_civil,
         ha_recibido_saeles: form.ha_recibido_saeles,
         veces_saeles_previas: form.veces_saeles_previas || 0,
-        contacto_emergencia_nombre: form.contacto_emergencia_nombre,
+        contacto_emergencia_nombre: formatoNombrePropio(form.contacto_emergencia_nombre),
         contacto_emergencia_telefono: form.contacto_emergencia_telefono,
       });
       await inscribirSiHaceFalta(nuevo.id);
@@ -585,7 +617,7 @@ export default function Registro() {
 
         {paso === 1 && eventoActual.fecha_limite_registro && (
           <p className="mb-4 text-center text-sm font-semibold text-ink/70">
-            ⏰ Inscripciones hasta el {new Date(eventoActual.fecha_limite_registro).toLocaleDateString('es-HN', { day: 'numeric', month: 'long', year: 'numeric' })}
+            ⏰ Inscripciones hasta el {formatearFechaLarga(eventoActual.fecha_limite_registro)}
             {eventoActual.hora_limite_registro && `, ${formatearHoraEs(eventoActual.hora_limite_registro)}`}
           </p>
         )}

@@ -101,6 +101,42 @@ export default function AdminSaelistas() {
     setConfirmacion({ mensaje, textoConfirmar, onConfirmar });
   }
 
+  // --- Enlace temporal de autoservicio (los Saelistas llenan su propia ficha) ---
+  const [estadoEnlace, setEstadoEnlace] = useState(null); // { expira_en, activo } | null
+  const [generandoEnlace, setGenerandoEnlace] = useState(false);
+
+  async function cargarEstadoEnlace() {
+    try {
+      const { data } = await api.get('/admin/saelistas/enlace-estado');
+      setEstadoEnlace(data);
+    } catch (err) {
+      // silencioso — no bloquea el resto de la pantalla si esto falla
+    }
+  }
+
+  useEffect(() => { cargarEstadoEnlace(); }, []);
+
+  async function generarEnlace() {
+    setGenerandoEnlace(true);
+    setError('');
+    try {
+      const { data } = await api.post('/admin/saelistas/generar-enlace');
+      setEstadoEnlace({ expira_en: data.expira_en, activo: true });
+      mostrarAviso('✓ Enlace generado — válido por 24 horas');
+    } catch (err) {
+      setError(mensajeError(err));
+    } finally {
+      setGenerandoEnlace(false);
+    }
+  }
+
+  const urlFichaPublica = `${window.location.origin}/ficha-saelista`;
+
+  function copiarEnlace() {
+    navigator.clipboard.writeText(urlFichaPublica);
+    mostrarAviso('✓ Enlace copiado');
+  }
+
   // --- Asistencia al evento (sin módulo de cobro, no pagan) ---
   const [eventoActual, setEventoActual] = useState(null);
   const [asistencia, setAsistencia] = useState([]);
@@ -356,22 +392,47 @@ export default function AdminSaelistas() {
       </div>
       <p className="mt-1 text-sm text-ink/50">Servidores voluntarios de SAEL Hombres. Administrado solo desde el panel — sin login propio.</p>
 
-      {(vista === 'lista' || vista === 'asistencia') && (
-        <div className="mt-3 flex gap-2">
-          <button
-            onClick={() => setVista('lista')}
-            className={`rounded-full px-4 py-1.5 text-xs font-semibold ${vista === 'lista' ? 'bg-ink text-white' : 'border border-ink/20 text-ink/70 hover:bg-ink/5'}`}
-          >
-            Servidores
-          </button>
-          <button
-            onClick={() => setVista('asistencia')}
-            className={`rounded-full px-4 py-1.5 text-xs font-semibold ${vista === 'asistencia' ? 'bg-ink text-white' : 'border border-ink/20 text-ink/70 hover:bg-ink/5'}`}
-          >
-            ★ Asistencia al evento
-          </button>
+      {/* Pestañas (solo en lista/asistencia) + enlace temporal de
+          autoservicio en la misma línea — el enlace SIEMPRE está visible,
+          sin importar en qué vista esté el admin. */}
+      <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
+        <div className="flex gap-2">
+          {(vista === 'lista' || vista === 'asistencia') && (
+            <>
+              <button
+                onClick={() => setVista('lista')}
+                className={`rounded-full px-4 py-1.5 text-xs font-semibold ${vista === 'lista' ? 'bg-ink text-white' : 'border border-ink/20 text-ink/70 hover:bg-ink/5'}`}
+              >
+                Servidores
+              </button>
+              <button
+                onClick={() => setVista('asistencia')}
+                className={`rounded-full px-4 py-1.5 text-xs font-semibold ${vista === 'asistencia' ? 'bg-ink text-white' : 'border border-ink/20 text-ink/70 hover:bg-ink/5'}`}
+              >
+                ★ Asistencia al evento
+              </button>
+            </>
+          )}
         </div>
-      )}
+
+        <div className="flex flex-wrap items-center gap-3 rounded-xl border border-ink/10 bg-parchment-2 px-4 py-2">
+          <button
+            onClick={generarEnlace}
+            disabled={generandoEnlace}
+            className="rounded-full bg-[#007334] px-4 py-1.5 text-xs font-semibold text-white hover:bg-[#005c29] disabled:opacity-50"
+          >
+            {generandoEnlace ? 'Generando…' : estadoEnlace?.activo ? '🔗 Renovar enlace (24h)' : '🔗 Generar enlace (24h)'}
+          </button>
+          <button onClick={copiarEnlace} className="rounded-full border border-ink/20 px-4 py-1.5 text-xs font-semibold text-ink/70 hover:bg-ink/5">
+            Copiar enlace
+          </button>
+          <span className="text-xs text-ink/50">
+            {estadoEnlace?.activo
+              ? <>✅ Activo hasta el {new Date(estadoEnlace.expira_en).toLocaleString('es-HN', { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' })}</>
+              : '⚪ Sin enlace activo'}
+          </span>
+        </div>
+      </div>
 
       {error && <p className="mt-4 rounded-lg bg-ember/10 p-3 text-sm text-ember">{error}</p>}
 

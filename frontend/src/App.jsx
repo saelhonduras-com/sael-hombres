@@ -4,6 +4,7 @@ import Footer from './components/Footer.jsx';
 import RutaProtegida from './components/RutaProtegida.jsx';
 import Home from './pages/Home.jsx';
 import Registro from './pages/Registro.jsx';
+import FichaSaelista from './pages/FichaSaelista.jsx';
 import Login from './pages/admin/Login.jsx';
 import AdminLayout from './pages/admin/AdminLayout.jsx';
 import AdminEventos from './pages/admin/AdminEventos.jsx';
@@ -33,6 +34,7 @@ function App() {
       <Routes>
         <Route path="/" element={<PaginaPublica><Home /></PaginaPublica>} />
         <Route path="/registro" element={<PaginaPublica><Registro /></PaginaPublica>} />
+        <Route path="/ficha-saelista" element={<PaginaPublica><FichaSaelista /></PaginaPublica>} />
         <Route path="/admin/login" element={<><Navbar /><Login /></>} />
         <Route
           path="/admin"

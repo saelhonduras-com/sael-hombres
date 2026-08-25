@@ -383,4 +383,180 @@ router.put('/admin/saelista-asistencias/:saelista_id/presencial', requireAuth, r
   }
 });
 
+// ============================================================
+// ENLACE TEMPORAL DE AUTOSERVICIO (Saelistas llenan su propia ficha,
+// sin login — validado por DNI, vence 24h reales después de generarse)
+// ============================================================
+
+// Admin: genera (o renueva) el enlace — vence exactamente 24 horas
+// después de este clic, no a medianoche ni por día calendario.
+router.post('/admin/saelistas/generar-enlace', requireAuth, requireModulo('saelistas', 'edicion'), async (req, res) => {
+  try {
+    const { rows } = await pool.query(
+      `INSERT INTO saelistas_enlace_config (id, expira_en)
+       VALUES (1, now() + interval '24 hours')
+       ON CONFLICT (id) DO UPDATE SET expira_en = EXCLUDED.expira_en
+       RETURNING expira_en`
+    );
+    res.json({ expira_en: rows[0].expira_en });
+  } catch (err) {
+    res.status(500).json({ error: 'No se pudo generar el enlace.' });
+  }
+});
+
+// Admin: consulta el estado actual del enlace (para mostrarlo en el panel)
+router.get('/admin/saelistas/enlace-estado', requireAuth, requireModulo('saelistas', 'consulta'), async (req, res) => {
+  try {
+    const { rows } = await pool.query(`SELECT expira_en FROM saelistas_enlace_config WHERE id = 1`);
+    const expiraEn = rows[0]?.expira_en || null;
+    const activo = !!expiraEn && new Date(expiraEn).getTime() > Date.now();
+    res.json({ expira_en: expiraEn, activo });
+  } catch (err) {
+    res.status(500).json({ error: 'No se pudo consultar el estado del enlace.' });
+  }
+});
+
+// Revisa si el enlace sigue vigente — la usan las 3 rutas públicas de
+// abajo para no dejar pasar nada fuera de la ventana de 24 horas, sin
+// importar qué diga el frontend (la validación real vive aquí).
+async function enlaceActivo() {
+  const { rows } = await pool.query(`SELECT expira_en FROM saelistas_enlace_config WHERE id = 1`);
+  const expiraEn = rows[0]?.expira_en;
+  return !!expiraEn && new Date(expiraEn).getTime() > Date.now();
+}
+
+// Público: para que la página del formulario sepa si mostrarse o no,
+// antes incluso de pedir el DNI.
+router.get('/saelistas/enlace-activo', async (req, res) => {
+  try {
+    const activo = await enlaceActivo();
+    res.json({ activo });
+  } catch (err) {
+    res.status(500).json({ error: 'No se pudo verificar el enlace.' });
+  }
+});
+
+// Público: busca un Saelista por DNI (para precargar su ficha si ya
+// existe, o dejar el formulario en blanco si es alguien nuevo).
+router.get('/saelistas/dni/:dni', async (req, res) => {
+  if (!(await enlaceActivo())) {
+    return res.status(403).json({ error: 'Este enlace ya venció. Pide al administrador que genere uno nuevo.' });
+  }
+  const { dni } = req.params;
+  try {
+    const { rows } = await pool.query(`SELECT * FROM saelistas WHERE dni = $1`, [dni]);
+    if (rows.length === 0) {
+      return res.json({ existe: false });
+    }
+    res.json({ existe: true, saelista: rows[0] });
+  } catch (err) {
+    res.status(500).json({ error: 'No se pudo verificar el DNI.' });
+  }
+});
+
+// Público: crea un Saelista nuevo (persona que no estaba en el sistema).
+// Doble chequeo del DNI aquí también — aunque el frontend ya buscó antes,
+// nunca hay que confiar solo en eso: si alguien más se registró con ese
+// mismo DNI en el segundo intermedio, esto evita el duplicado igual.
+router.post('/saelistas', async (req, res) => {
+  if (!(await enlaceActivo())) {
+    return res.status(403).json({ error: 'Este enlace ya venció. Pide al administrador que genere uno nuevo.' });
+  }
+  const {
+    nombre_completo, dni, celular, email, estado_civil,
+    hijos_cantidad, nietos_cantidad, fecha_nacimiento, nombre_esposa, profesion,
+    contacto_emergencia_telefono, foto,
+    capitulo, zona, departamento, municipio,
+    fecha_inscripcion_capitulo, tiempo_fihnec, cargo_actual, cargos_desempenados,
+    tipo_testimonio, formacion_oficial, otras_participaciones,
+  } = req.body;
+
+  if (!nombre_completo || !dni) {
+    return res.status(400).json({ error: 'El nombre completo y el DNI son obligatorios.' });
+  }
+
+  try {
+    const existente = await pool.query(`SELECT id FROM saelistas WHERE dni = $1`, [dni]);
+    if (existente.rows.length > 0) {
+      return res.status(409).json({ error: 'Ya existe un Saelista con este DNI — no se creó un duplicado.' });
+    }
+    const { rows } = await pool.query(
+      `INSERT INTO saelistas (
+        nombre_completo, dni, celular, email, estado_civil,
+        hijos_cantidad, nietos_cantidad, fecha_nacimiento, nombre_esposa, profesion,
+        contacto_emergencia_telefono, foto,
+        capitulo, zona, departamento, municipio,
+        fecha_inscripcion_capitulo, tiempo_fihnec, cargo_actual, cargos_desempenados,
+        tipo_testimonio, formacion_oficial, otras_participaciones
+      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23)
+      RETURNING *`,
+      [
+        nombre_completo, dni, celular || null, email || null, estado_civil || null,
+        hijos_cantidad || null, nietos_cantidad || null, fecha_nacimiento || null, nombre_esposa || null, profesion || null,
+        contacto_emergencia_telefono || null, foto || null,
+        capitulo || null, zona || null, departamento || null, municipio || null,
+        fecha_inscripcion_capitulo || null, tiempo_fihnec || null, cargo_actual || null, cargos_desempenados || [],
+        tipo_testimonio || [], formacion_oficial || [], otras_participaciones || [],
+      ]
+    );
+    res.status(201).json(rows[0]);
+  } catch (err) {
+    if (err.code === '23505') {
+      return res.status(409).json({ error: 'Ya existe un Saelista con este DNI — no se creó un duplicado.' });
+    }
+    res.status(500).json({ error: 'No se pudo guardar tu información.' });
+  }
+});
+
+// Público: completa/actualiza la ficha de un Saelista que ya existía —
+// se identifica por DNI (no por id, que la persona no tiene forma de saber).
+router.put('/saelistas/dni/:dni', async (req, res) => {
+  if (!(await enlaceActivo())) {
+    return res.status(403).json({ error: 'Este enlace ya venció. Pide al administrador que genere uno nuevo.' });
+  }
+  const { dni } = req.params;
+  const {
+    nombre_completo, celular, email, estado_civil,
+    hijos_cantidad, nietos_cantidad, fecha_nacimiento, nombre_esposa, profesion,
+    contacto_emergencia_telefono, foto,
+    capitulo, zona, departamento, municipio,
+    fecha_inscripcion_capitulo, tiempo_fihnec, cargo_actual, cargos_desempenados,
+    tipo_testimonio, formacion_oficial, otras_participaciones,
+  } = req.body;
+
+  if (!nombre_completo) {
+    return res.status(400).json({ error: 'El nombre completo es obligatorio.' });
+  }
+
+  try {
+    const { rows } = await pool.query(
+      `UPDATE saelistas SET
+        nombre_completo = $1, celular = $2, email = $3, estado_civil = $4,
+        hijos_cantidad = $5, nietos_cantidad = $6, fecha_nacimiento = $7, nombre_esposa = $8, profesion = $9,
+        contacto_emergencia_telefono = $10, foto = $11,
+        capitulo = $12, zona = $13, departamento = $14, municipio = $15,
+        fecha_inscripcion_capitulo = $16, tiempo_fihnec = $17, cargo_actual = $18, cargos_desempenados = $19,
+        tipo_testimonio = $20, formacion_oficial = $21, otras_participaciones = $22,
+        actualizado_en = now()
+      WHERE dni = $23
+      RETURNING *`,
+      [
+        nombre_completo, celular || null, email || null, estado_civil || null,
+        hijos_cantidad || null, nietos_cantidad || null, fecha_nacimiento || null, nombre_esposa || null, profesion || null,
+        contacto_emergencia_telefono || null, foto || null,
+        capitulo || null, zona || null, departamento || null, municipio || null,
+        fecha_inscripcion_capitulo || null, tiempo_fihnec || null, cargo_actual || null, cargos_desempenados || [],
+        tipo_testimonio || [], formacion_oficial || [], otras_participaciones || [],
+        dni,
+      ]
+    );
+    if (rows.length === 0) {
+      return res.status(404).json({ error: 'No se encontró un Saelista con ese DNI.' });
+    }
+    res.json(rows[0]);
+  } catch (err) {
+    res.status(500).json({ error: 'No se pudo actualizar tu información.' });
+  }
+});
+
 module.exports = router;

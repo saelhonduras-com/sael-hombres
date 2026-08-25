@@ -1,10 +1,12 @@
 import { useEffect, useState } from 'react';
 
-// Igual criterio que ya usa el backend (POST /inscripciones) y Home.jsx:
-// hora Honduras real, vía offset -06:00 explícito, no la hora del
-// dispositivo de quien esté viendo la página.
+// Igual criterio que ya usa el backend (POST /inscripciones): hora
+// Honduras real, vía offset -06:00 explícito. Se lee el texto de la
+// fecha directo, SIN pasar por new Date(fechaObjetivo) primero — ese
+// paso de más es justo lo que causaba que se corriera un día (mismo bug
+// ya corregido en Home.jsx y Registro.jsx).
 function calcularRestante(fechaObjetivo, horaObjetivo) {
-  const fechaStr = new Date(fechaObjetivo).toISOString().slice(0, 10);
+  const fechaStr = fechaObjetivo.slice(0, 10);
   const horaStr = horaObjetivo || '23:59';
   const limite = new Date(`${fechaStr}T${horaStr}:00.000-06:00`);
   const diff = limite.getTime() - Date.now();

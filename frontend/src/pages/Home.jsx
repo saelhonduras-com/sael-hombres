@@ -8,17 +8,28 @@ const MESES = [
   'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre',
 ];
 
+// Trabaja directo con el texto "YYYY-MM-DD" (o el inicio de un ISO más
+// largo) — nunca crea un objeto Date a partir de una fecha-sin-hora,
+// porque eso la interpreta como medianoche UTC y, al mostrarla en hora
+// Honduras (UTC-6), la corre un día hacia atrás.
+function partesFecha(fechaISO) {
+  const [anio, mes, dia] = fechaISO.slice(0, 10).split('-').map(Number);
+  return { anio, mes, dia };
+}
+
 function formatearRango(inicio, fin) {
-  const fi = new Date(inicio);
-  const ff = new Date(fin);
-  const mismomes = fi.getMonth() === ff.getMonth();
-  const diaIni = fi.getDate();
-  const diaFin = ff.getDate();
-  const mesFin = MESES[ff.getMonth()];
-  const anio = ff.getFullYear();
+  const fi = partesFecha(inicio);
+  const ff = partesFecha(fin);
+  const mismomes = fi.mes === ff.mes && fi.anio === ff.anio;
   return mismomes
-    ? `${diaIni} al ${diaFin} de ${mesFin}, ${anio}`
-    : `${diaIni} de ${MESES[fi.getMonth()]} al ${diaFin} de ${mesFin}, ${anio}`;
+    ? `${fi.dia} al ${ff.dia} de ${MESES[ff.mes - 1]}, ${ff.anio}`
+    : `${fi.dia} de ${MESES[fi.mes - 1]} al ${ff.dia} de ${MESES[ff.mes - 1]}, ${ff.anio}`;
+}
+
+// Igual criterio para fechas sueltas, ej. la de cierre de inscripción.
+function formatearFechaLarga(fechaISO) {
+  const { anio, mes, dia } = partesFecha(fechaISO);
+  return `${dia} de ${MESES[mes - 1]} de ${anio}`;
 }
 
 // "18:00" (24h, como se guarda) → "6:00 p. m." (12h, estilo RAE — igual
@@ -159,7 +170,6 @@ export default function Home() {
             resto, con intención (Jesucristo como la luz). Va encima de la
             capa oscura, con mix-blend-screen, para que sí se note brillar. */}
         <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_38%,theme(colors.gold-light)_0%,transparent_32%)] opacity-70 mix-blend-screen" />
-        <div className="pointer-events-none absolute -top-24 left-1/2 h-96 w-96 -translate-x-1/2 rounded-full bg-flame/25 blur-3xl" />
 
         <div className="relative mx-auto max-w-5xl px-5 pb-20 pt-16 text-center">
           <p className="text-xs font-bold uppercase tracking-[0.35em] text-gold-light [text-shadow:0_1px_8px_rgba(0,0,0,0.5)]">
@@ -242,7 +252,7 @@ export default function Home() {
                 <p className="mt-1 text-ink/60">{formatearRango(eventoActual.fecha_inicio, eventoActual.fecha_fin)}</p>
                 {eventoActual.abierto && eventoActual.fecha_limite_registro && (
                   <p className="mt-2 text-sm font-semibold text-ink/70">
-                    ⏰ Inscripciones hasta el {new Date(eventoActual.fecha_limite_registro).toLocaleDateString('es-HN', { day: 'numeric', month: 'long', year: 'numeric' })}
+                    ⏰ Inscripciones hasta el {formatearFechaLarga(eventoActual.fecha_limite_registro)}
                     {eventoActual.hora_limite_registro && `, ${formatearHoraEs(eventoActual.hora_limite_registro)}`}
                   </p>
                 )}
@@ -318,7 +328,8 @@ export default function Home() {
 
           <p className="mt-8 text-center font-display text-xl font-bold text-ink">📢 Recordatorio importante</p>
           <p className="mx-auto mt-1 max-w-md text-center text-sm text-ink/60">
-            Se vienen 3 días increíbles del SAEL — queremos que estés 100% preparado y cómodo.
+            Se vienen 3 días increíbles del SAEL. Debe traer consigo su equipaje completo y artículos de
+            uso personal para su estancia; queremos que esté 100% preparado y cómodo.
           </p>
 
           <div className="mx-auto mt-6 grid max-w-2xl gap-3 sm:grid-cols-2">
@@ -414,7 +425,7 @@ export default function Home() {
             >
               Escríbenos por WhatsApp
             </a>
-            <p className="mt-2 text-sm font-semibold text-ember/75">No se reciben llamadas, ni audios, solo mensajes.</p>
+            <p className="mt-2 text-sm font-semibold text-ember/75">No se reciben llamadas, ni audios, solo mensajes escritos.</p>
           </div>
         </div>
       </section>
