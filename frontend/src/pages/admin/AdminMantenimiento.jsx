@@ -16,6 +16,14 @@ export default function AdminMantenimiento() {
   const [confirmacion, setConfirmacion] = useState(null); // { item, onConfirmar } | null
   const [aviso, setAviso] = useState('');
 
+  // --- Respaldo completo del sistema ---
+  const [generandoRespaldo, setGenerandoRespaldo] = useState(false);
+  const [archivoRespaldo, setArchivoRespaldo] = useState(null); // { nombre, contenido, resumen } | null
+  const [palabraConfirmacion, setPalabraConfirmacion] = useState('');
+  const [restaurandoRespaldo, setRestaurandoRespaldo] = useState(false);
+  const [confirmandoRespaldo, setConfirmandoRespaldo] = useState(false);
+  const [segundosRestaurando, setSegundosRestaurando] = useState(0);
+
   function mostrarAviso(mensaje) {
     setAviso(mensaje);
     setTimeout(() => setAviso(''), 2000);
@@ -35,6 +43,13 @@ export default function AdminMantenimiento() {
   }
 
   useEffect(() => { cargar(); }, []);
+
+  useEffect(() => {
+    if (!restaurandoRespaldo) return;
+    setSegundosRestaurando(0);
+    const intervalo = setInterval(() => setSegundosRestaurando((s) => s + 1), 1000);
+    return () => clearInterval(intervalo);
+  }, [restaurandoRespaldo]);
 
   async function restaurar(item) {
     setRestaurandoId(item.id);
@@ -65,6 +80,73 @@ export default function AdminMantenimiento() {
         }
       },
     });
+  }
+
+  // --- Respaldo completo del sistema ---
+
+  async function generarRespaldo() {
+    setGenerandoRespaldo(true);
+    setError('');
+    try {
+      const { data } = await api.get('/admin/respaldo', { responseType: 'blob' });
+      const url = window.URL.createObjectURL(new Blob([data], { type: 'application/json' }));
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `respaldo-sael-hombres-${new Date().toISOString().slice(0, 10)}.json`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      window.URL.revokeObjectURL(url);
+      mostrarAviso('✓ Respaldo descargado');
+    } catch (err) {
+      setError('No se pudo generar el respaldo.');
+    } finally {
+      setGenerandoRespaldo(false);
+    }
+  }
+
+  function seleccionarArchivoRespaldo(e) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setError('');
+    setPalabraConfirmacion('');
+    const lector = new FileReader();
+    lector.onload = (ev) => {
+      try {
+        const contenido = JSON.parse(ev.target.result);
+        if (!contenido.tablas || typeof contenido.tablas !== 'object') {
+          setError('Ese archivo no parece ser un respaldo válido de este sistema.');
+          setArchivoRespaldo(null);
+          return;
+        }
+        const resumen = Object.entries(contenido.tablas)
+          .map(([tabla, filas]) => ({ tabla, cantidad: Array.isArray(filas) ? filas.length : 0 }))
+          .sort((a, b) => b.cantidad - a.cantidad);
+        setArchivoRespaldo({ nombre: file.name, contenido, resumen, generadoEn: contenido.generado_en });
+      } catch (err) {
+        setError('Ese archivo no se pudo leer — asegúrate de que sea el archivo .json del respaldo, sin modificar.');
+        setArchivoRespaldo(null);
+      }
+    };
+    lector.readAsText(file);
+  }
+
+  async function confirmarRestauracion() {
+    setRestaurandoRespaldo(true);
+    setError('');
+    try {
+      await api.post('/admin/respaldo/restaurar', { respaldo: archivoRespaldo.contenido });
+      mostrarAviso('✓ Sistema restaurado desde el respaldo');
+      setArchivoRespaldo(null);
+      setPalabraConfirmacion('');
+      setConfirmandoRespaldo(false);
+      cargar();
+      refrescarResumen();
+    } catch (err) {
+      setError(mensajeError(err));
+    } finally {
+      setRestaurandoRespaldo(false);
+    }
   }
 
   // Candado extra del lado del frontend, por si alguien entra por URL
@@ -142,9 +224,98 @@ export default function AdminMantenimiento() {
         )}
       </div>
 
-      <div className="mt-4 rounded-2xl border border-dashed border-ink/15 bg-ink/5 p-5">
-        <h2 className="font-display text-base font-bold text-ink/50">📦 Respaldos completos</h2>
-        <p className="mt-1 text-sm text-ink/40">Próximamente — descargar y restaurar respaldos completos del sistema.</p>
+      <div className="mt-4 rounded-2xl border border-ink/10 bg-white p-6 shadow-sm">
+        <h2 className="font-display text-lg font-bold text-ink">📦 Respaldos completos</h2>
+        <p className="mt-1 text-sm text-ink/50">Descarga o restaura toda la base de datos — solo Super Admin.</p>
+
+        <div className="mt-5 flex flex-wrap gap-3">
+          <button
+            onClick={generarRespaldo}
+            disabled={generandoRespaldo}
+            className="rounded-full bg-[#007334] px-5 py-2.5 text-sm font-semibold text-white hover:bg-[#005c29] disabled:opacity-50"
+          >
+            {generandoRespaldo ? 'Generando…' : '⬇ Descargar respaldo completo'}
+          </button>
+
+          <label className="inline-block cursor-pointer rounded-full border border-ink/20 px-5 py-2.5 text-sm font-semibold text-ink/70 hover:bg-ink/5">
+            📁 Elegir archivo de respaldo…
+            <input type="file" accept="application/json,.json" className="hidden" onChange={seleccionarArchivoRespaldo} />
+          </label>
+        </div>
+
+        {archivoRespaldo && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink/40 px-4">
+            <div className="w-full max-w-lg rounded-2xl bg-white p-6 shadow-lg">
+              <div className="flex items-center gap-3">
+                <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-amber-500/10 text-xl">📁</span>
+                <h3 className="font-display text-lg font-bold text-ink">Archivo de respaldo cargado</h3>
+              </div>
+
+              <p className="mt-4 text-sm font-semibold text-ink">{archivoRespaldo.nombre}</p>
+              {archivoRespaldo.generadoEn && (
+                <p className="mt-0.5 text-xs text-ink/50">Generado el {formatoFecha(archivoRespaldo.generadoEn)}</p>
+              )}
+              <div className="mt-3 grid grid-cols-2 gap-x-4 gap-y-1 text-xs text-ink/60 sm:grid-cols-3">
+                {archivoRespaldo.resumen.slice(0, 9).map((r) => (
+                  <p key={r.tabla}>{r.tabla}: <span className="font-semibold text-ink">{r.cantidad}</span></p>
+                ))}
+              </div>
+
+              <div className="mt-4 rounded-lg bg-ember/10 p-3 text-sm text-ember">
+                ⚠️ Restaurar <strong>borra TODO lo que hay ahora mismo</strong> en el sistema y lo reemplaza con este
+                archivo. No se puede deshacer. Genera un respaldo del estado actual primero si no estás seguro.
+              </div>
+
+              {!confirmandoRespaldo ? (
+                <div className="mt-5 flex justify-end gap-3">
+                  <button onClick={() => setArchivoRespaldo(null)} className="rounded-full border border-ink/20 px-4 py-1.5 text-sm font-semibold text-ink/70 hover:bg-ink/5">
+                    Cancelar
+                  </button>
+                  <button onClick={() => setConfirmandoRespaldo(true)} className="rounded-full bg-ember px-4 py-1.5 text-sm font-semibold text-white hover:bg-ember-light">
+                    Continuar con la restauración
+                  </button>
+                </div>
+              ) : (
+                <div className="mt-5">
+                  <label>
+                    <span className="mb-1 block text-xs font-semibold text-ink/60">
+                      Escribe <span className="font-mono font-bold text-ember">RESTAURAR</span> para confirmar:
+                    </span>
+                    <input
+                      type="text"
+                      value={palabraConfirmacion}
+                      onChange={(e) => setPalabraConfirmacion(e.target.value)}
+                      disabled={restaurandoRespaldo}
+                      className="w-full rounded-lg border border-ink/15 px-3 py-2 text-sm focus:border-ember focus:outline-none disabled:bg-ink/5"
+                      placeholder="RESTAURAR"
+                    />
+                  </label>
+                  {restaurandoRespaldo && (
+                    <p className="mt-2 text-center text-xs text-ink/50">
+                      ⏱️ Restaurando desde hace {segundosRestaurando}s — puede tardar varios minutos, no cierres esta ventana.
+                    </p>
+                  )}
+                  <div className="mt-3 flex justify-end gap-3">
+                    <button
+                      onClick={() => { setConfirmandoRespaldo(false); setPalabraConfirmacion(''); }}
+                      disabled={restaurandoRespaldo}
+                      className="rounded-full border border-ink/20 px-4 py-1.5 text-sm font-semibold text-ink/60 hover:bg-ink/5 disabled:cursor-not-allowed disabled:opacity-40"
+                    >
+                      Cancelar
+                    </button>
+                    <button
+                      onClick={confirmarRestauracion}
+                      disabled={palabraConfirmacion !== 'RESTAURAR' || restaurandoRespaldo}
+                      className="rounded-full bg-ember px-4 py-1.5 text-sm font-semibold text-white hover:bg-ember-light disabled:cursor-not-allowed disabled:opacity-40"
+                    >
+                      {restaurandoRespaldo ? `Restaurando… (${segundosRestaurando}s)` : 'Restaurar sistema completo'}
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
       </div>
 
       {confirmacion && (

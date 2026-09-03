@@ -181,10 +181,28 @@ router.put('/admin/habitaciones/:id', requireAuth, requireModulo('habitaciones',
 router.delete('/admin/habitaciones/:id', requireAuth, requireModulo('habitaciones', 'edicion'), async (req, res) => {
   const { id } = req.params;
   try {
-    const { rows } = await pool.query(`DELETE FROM habitaciones WHERE id = $1 RETURNING id`, [id]);
-    if (rows.length === 0) {
+    const habitacion = await pool.query(`SELECT * FROM habitaciones WHERE id = $1`, [id]);
+    if (habitacion.rows.length === 0) {
       return res.status(404).json({ error: 'Habitación no encontrada.' });
     }
+    const fila = habitacion.rows[0];
+
+    // Se archiva en la Papelera ANTES de borrar (Fase 2 de Mantenimiento).
+    // Sus ocupantes y cobro de ese momento (habitacion_ocupantes,
+    // habitacion_reservas) se borran solos por el ON DELETE CASCADE ya
+    // configurado — y a propósito NO se restauran junto con la habitación
+    // (decisión tomada con Carlos): si alguien restaura esta habitación
+    // más tarde, sus antiguos ocupantes pudieron haberse reasignado a
+    // otra habitación mientras tanto, y traerlos de vuelta chocaría con
+    // el candado contra asignaciones duplicadas. Vuelve vacía, y se
+    // reasigna manualmente si hace falta.
+    await pool.query(
+      `INSERT INTO papelera (tipo, descripcion, tabla_origen, datos)
+       VALUES ('Habitación', $1, 'habitaciones', $2)`,
+      [`Habitación ${fila.numero}`, JSON.stringify(fila)]
+    );
+
+    await pool.query(`DELETE FROM habitaciones WHERE id = $1`, [id]);
     res.json({ ok: true });
   } catch (err) {
     res.status(500).json({ error: 'No se pudo eliminar la habitación.' });

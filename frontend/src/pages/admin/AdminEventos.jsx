@@ -182,8 +182,8 @@ export default function AdminEventos() {
 
   function eliminar(id, nombre) {
     setConfirmacion({
-      mensaje: `Se eliminará "${nombre}" y también todas las inscripciones asociadas a este evento. Esta acción no se puede deshacer.`,
-      textoConfirmar: 'Sí, eliminar',
+      mensaje: `Se eliminará "${nombre}" permanentemente — junto con TODAS sus inscripciones, asignaciones y cobros de habitación, todo su financiero (Entradas & Salidas, Control de Ingresos/Egresos), y la asistencia de Saelistas registrada para este evento. Esta acción no se puede deshacer ni restaurar.`,
+      textoConfirmar: 'Sí, eliminar todo',
       onConfirmar: async () => {
         setError('');
         try {
@@ -401,13 +401,15 @@ export default function AdminEventos() {
                     >
                       Editar
                     </button>
-                    <button
-                      onClick={() => eliminar(ev.id, ev.nombre)}
-                      disabled={!modoEdicion}
-                      className="rounded-full bg-ember/10 px-3 py-1 text-xs font-semibold text-ember hover:bg-ember/20 disabled:cursor-not-allowed disabled:opacity-40"
-                    >
-                      Eliminar
-                    </button>
+                    {rol === 'super_admin' && (
+                      <button
+                        onClick={() => eliminar(ev.id, ev.nombre)}
+                        disabled={!modoEdicion}
+                        className="rounded-full bg-ember/10 px-3 py-1 text-xs font-semibold text-ember hover:bg-ember/20 disabled:cursor-not-allowed disabled:opacity-40"
+                      >
+                        Eliminar
+                      </button>
+                    )}
                   </div>
                 </div>
               );

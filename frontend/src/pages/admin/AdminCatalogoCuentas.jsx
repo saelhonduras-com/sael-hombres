@@ -107,7 +107,7 @@ export default function AdminCatalogoCuentas() {
       ? ' ⚠️ ESTA CUENTA CALCULA SOLA EL 15% DE ISV sobre las 5 comidas del evento. Si la borras, ese cálculo deja de aparecer en el reporte.'
       : '';
     pedirConfirmacion({
-      mensaje: `Se eliminará "${cuenta.codigo} ${cuenta.nombre}" — y también todas sus cuentas hijas y cualquier renglón manual que tuvieran registrado. Esta acción no se puede deshacer.${advertenciaComida}`,
+      mensaje: `Se eliminará "${cuenta.codigo} ${cuenta.nombre}" — y también todas sus cuentas hijas y cualquier renglón manual que tuvieran registrado, en cualquier evento. Esta acción no se puede deshacer ni restaurar.${advertenciaComida}`,
       textoConfirmar: 'Sí, eliminar',
       onConfirmar: async () => {
         setError('');
@@ -215,9 +215,11 @@ export default function AdminCatalogoCuentas() {
                     <button onClick={() => abrirEditar(c)} disabled={!modoEdicion} className={`ml-2 ${btnEditar} disabled:cursor-not-allowed disabled:opacity-40`}>
                       Editar
                     </button>
-                    <button onClick={() => eliminar(c)} disabled={!modoEdicion} className={`ml-2 ${btnEliminar} disabled:cursor-not-allowed disabled:opacity-40`}>
-                      Eliminar
-                    </button>
+                    {rol === 'super_admin' && (
+                      <button onClick={() => eliminar(c)} disabled={!modoEdicion} className={`ml-2 ${btnEliminar} disabled:cursor-not-allowed disabled:opacity-40`}>
+                        Eliminar
+                      </button>
+                    )}
                   </td>
                 </tr>
               ))}

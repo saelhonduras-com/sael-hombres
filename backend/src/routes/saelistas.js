@@ -309,16 +309,28 @@ router.put('/admin/saelistas/:id', requireAuth, requireModulo('saelistas', 'edic
   }
 });
 
-// Admin: elimina un Saelista. A diferencia de Participantes, aquí no hay
-// historial de asistencias/inscripciones que proteger, así que es borrado
-// directo (con confirmación en el frontend), no un "ocultar".
+// Admin: elimina un Saelista. A diferencia de Participantes, aquí sí se
+// borra de verdad (no hay columna "oculto") — pero antes se archiva una
+// copia completa en la Papelera, para poder restaurarlo si fue un error.
+// Las habitaciones/asistencias asociadas se limpian solas por el
+// ON DELETE CASCADE ya configurado en la base — no hace falta tocarlas
+// a mano aquí, a diferencia de lo que sí hay que hacer con Participantes.
 router.delete('/admin/saelistas/:id', requireAuth, requireModulo('saelistas', 'edicion'), async (req, res) => {
   const { id } = req.params;
   try {
-    const { rows } = await pool.query(`DELETE FROM saelistas WHERE id = $1 RETURNING id`, [id]);
-    if (rows.length === 0) {
+    const saelista = await pool.query(`SELECT * FROM saelistas WHERE id = $1`, [id]);
+    if (saelista.rows.length === 0) {
       return res.status(404).json({ error: 'Saelista no encontrado.' });
     }
+    const fila = saelista.rows[0];
+
+    await pool.query(
+      `INSERT INTO papelera (tipo, descripcion, tabla_origen, datos)
+       VALUES ('Saelista', $1, 'saelistas', $2)`,
+      [fila.nombre_completo, JSON.stringify(fila)]
+    );
+
+    await pool.query(`DELETE FROM saelistas WHERE id = $1`, [id]);
     res.json({ ok: true });
   } catch (err) {
     res.status(500).json({ error: 'No se pudo eliminar el Saelista.' });

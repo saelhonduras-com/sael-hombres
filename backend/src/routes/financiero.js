@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const pool = require('../db');
-const { requireAuth, requireModulo } = require('../middleware/auth');
+const { requireAuth, requireModulo, requireRole } = require('../middleware/auth');
 const XLSX = require('xlsx');
 const PDFDocument = require('pdfkit');
 
@@ -91,7 +91,11 @@ router.put('/admin/catalogo-cuentas/:id', requireAuth, requireModulo('catalogo_c
 // Admin: elimina una cuenta — también elimina sus cuentas hijas y
 // cualquier movimiento manual que tuviera registrado (ON DELETE CASCADE
 // en la migración), así que se pide confirmación fuerte en el frontend.
-router.delete('/admin/catalogo-cuentas/:id', requireAuth, requireModulo('catalogo_cuentas', 'edicion'), async (req, res) => {
+// Eliminar una cuenta — SOLO Super Admin (decisión intencional: borrar
+// una cuenta arrastra en cascada TODAS sus sub-cuentas y cualquier
+// renglón manual registrado en cualquier evento — no es una acción de
+// admin regular, sin importar el permiso que tenga en Usuarios).
+router.delete('/admin/catalogo-cuentas/:id', requireAuth, requireRole('super_admin'), async (req, res) => {
   const { id } = req.params;
   try {
     const { rows } = await pool.query(`DELETE FROM catalogo_cuentas WHERE id = $1 RETURNING id`, [id]);

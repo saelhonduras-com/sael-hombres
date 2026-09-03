@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const pool = require('../db');
-const { requireAuth, requireModulo } = require('../middleware/auth');
+const { requireAuth, requireModulo, requireRole } = require('../middleware/auth');
 
 // Honduras es UTC-6 todo el año (no tiene horario de verano), así que un
 // desplazamiento fijo es suficiente y no depende de la zona horaria del servidor.
@@ -43,16 +43,19 @@ router.post('/admin/eventos', requireAuth, requireModulo('eventos', 'edicion'), 
     await cliente.query('BEGIN');
 
     // Bloqueo duro: mientras el mes en curso tenga su propio evento, ningún
-    // otro evento puede volverse actual ni abrirse desde el panel. Sin
-    // excepciones — es intencional, para evitar cambiar el evento en vivo
-    // por error mientras su mes sigue corriendo.
+    // otro evento puede volverse actual ni abrirse desde el panel — salvo
+    // que sea Super Admin, quien puede saltarse esto a propósito para
+    // correcciones administrativas.
     const { mes: mesHoy, anio: anioHoy } = mesEnCursoHonduras();
     const { rows: delMesRows } = await cliente.query(
       `SELECT id, nombre FROM eventos WHERE mes = $1 AND anio = $2`,
       [mesHoy, anioHoy]
     );
     const eventoDelMes = delMesRows[0];
-    if (eventoDelMes && (es_actual || abierto) && (Number(mes) !== mesHoy || Number(anio) !== anioHoy)) {
+    if (
+      req.usuario.rol !== 'super_admin' &&
+      eventoDelMes && (es_actual || abierto) && (Number(mes) !== mesHoy || Number(anio) !== anioHoy)
+    ) {
       await cliente.query('ROLLBACK');
       return res.status(403).json({
         error: `No se puede crear un evento actual o abierto de otro mes mientras estemos en el mes de "${eventoDelMes.nombre}". Este bloqueo es intencional.`,
@@ -95,14 +98,15 @@ router.put('/admin/eventos/:id', requireAuth, requireModulo('eventos', 'edicion'
     await cliente.query('BEGIN');
 
     // Mismo bloqueo duro que en la creación, más el caso extra de querer
-    // quitarle "actual" al evento del mes en curso sin poner otro en su lugar.
+    // quitarle "actual" al evento del mes en curso sin poner otro en su
+    // lugar — salvo que sea Super Admin, que puede saltárselo.
     const { mes: mesHoy, anio: anioHoy } = mesEnCursoHonduras();
     const { rows: delMesRows } = await cliente.query(
       `SELECT id, nombre, es_actual FROM eventos WHERE mes = $1 AND anio = $2`,
       [mesHoy, anioHoy]
     );
     const eventoDelMes = delMesRows[0];
-    if (eventoDelMes) {
+    if (eventoDelMes && req.usuario.rol !== 'super_admin') {
       const esElDelMes = Number(eventoDelMes.id) === Number(id);
       const intentaCambiarloAOtro = !esElDelMes && (es_actual || abierto);
       const intentaQuitarleActual = esElDelMes && eventoDelMes.es_actual && !es_actual;
@@ -138,17 +142,43 @@ router.put('/admin/eventos/:id', requireAuth, requireModulo('eventos', 'edicion'
   }
 });
 
-// Admin: elimina un evento
-router.delete('/admin/eventos/:id', requireAuth, requireModulo('eventos', 'edicion'), async (req, res) => {
+// Admin: "Finalizar evento" — cierra el registro y le quita "actual",
+// sin que otro evento lo reemplace todavía (eso se hace aparte, al
+// crear/marcar el siguiente). Se salta a propósito el bloqueo de "mes en
+// curso" que tienen las demás rutas — finalizar ANTES de que termine el
+// mes calendario es justo el propósito de este botón, no un error a
+// prevenir. Reversible: se puede volver a marcar como actual/abierto
+// manualmente desde Eventos si fue un error.
+router.put('/admin/eventos/:id/finalizar', requireAuth, requireModulo('eventos', 'edicion'), async (req, res) => {
   const { id } = req.params;
   try {
-    const { mes: mesHoy, anio: anioHoy } = mesEnCursoHonduras();
-    const { rows } = await pool.query(`SELECT nombre, mes, anio FROM eventos WHERE id = $1`, [id]);
-    const evento = rows[0];
-    if (evento && Number(evento.mes) === mesHoy && Number(evento.anio) === anioHoy) {
-      return res.status(403).json({
-        error: `No se puede eliminar "${evento.nombre}" mientras estemos en su mes. Este bloqueo es intencional.`,
-      });
+    const { rows } = await pool.query(
+      `UPDATE eventos SET es_actual = false, abierto = false WHERE id = $1 RETURNING *`,
+      [id]
+    );
+    if (rows.length === 0) {
+      return res.status(404).json({ error: 'Evento no encontrado.' });
+    }
+    res.json(rows[0]);
+  } catch (err) {
+    res.status(500).json({ error: 'No se pudo finalizar el evento.' });
+  }
+});
+
+// Admin: elimina un evento — SOLO Super Admin (decisión intencional:
+// borrar un evento arrastra en cascada TODAS sus inscripciones, cobros,
+// asignaciones de habitación y financiero — no es una acción de admin
+// regular, sin importar el permiso que tenga configurado en Usuarios).
+// El bloqueo de "mes en curso" NO aplica aquí a propósito — confirmado
+// con Carlos que el SA puede eliminar incluso el evento en vivo si hace
+// falta. Ya que solo el SA llega a esta ruta, no hace falta ninguna
+// verificación extra de rol para la excepción.
+router.delete('/admin/eventos/:id', requireAuth, requireRole('super_admin'), async (req, res) => {
+  const { id } = req.params;
+  try {
+    const { rows } = await pool.query(`SELECT nombre FROM eventos WHERE id = $1`, [id]);
+    if (rows.length === 0) {
+      return res.status(404).json({ error: 'Evento no encontrado.' });
     }
     await pool.query(`DELETE FROM eventos WHERE id = $1`, [id]);
     res.json({ ok: true });

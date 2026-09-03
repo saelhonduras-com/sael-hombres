@@ -439,9 +439,13 @@ router.get('/admin/participantes/estadisticas', requireAuth, requireModulo('part
 // aunque hoy no hay pantalla para "desocultar" — puede agregarse después).
 router.put('/admin/participantes/:id/ocultar', requireAuth, requireModulo('participantes', 'edicion'), async (req, res) => {
   const { id } = req.params;
+  const client = await pool.connect();
   try {
-    const participante = await pool.query(`SELECT * FROM participantes WHERE id = $1`, [id]);
+    await client.query('BEGIN');
+
+    const participante = await client.query(`SELECT * FROM participantes WHERE id = $1`, [id]);
     if (participante.rows.length === 0) {
+      await client.query('ROLLBACK');
       return res.status(404).json({ error: 'Participante no encontrado.' });
     }
     const fila = participante.rows[0];
@@ -449,23 +453,58 @@ router.put('/admin/participantes/:id/ocultar', requireAuth, requireModulo('parti
     // Guarda una copia completa ANTES de ocultar — así aparece en la
     // Papelera del módulo de Mantenimiento (solo Super Admin) y se puede
     // restaurar con un clic, sin necesitar SQL directo.
-    await pool.query(
+    await client.query(
       `INSERT INTO papelera (tipo, descripcion, tabla_origen, datos)
        VALUES ('Participante', $1, 'participantes', $2)`,
       [fila.nombre_completo, JSON.stringify(fila)]
     );
 
-    const { rows } = await pool.query(
+    const { rows } = await client.query(
       `UPDATE participantes SET oculto = true WHERE id = $1 RETURNING id`,
       [id]
     );
     if (rows.length === 0) {
+      await client.query('ROLLBACK');
       return res.status(404).json({ error: 'Participante no encontrado.' });
     }
+
+    // Se le libera la habitación SOLO del evento actual/activo (así se
+    // confirmó) — si tenía habitación asignada en un evento pasado ya
+    // finalizado, ese historial se queda intacto, no se toca.
+    const eventoActualRes = await client.query(`SELECT id FROM eventos WHERE es_actual = true LIMIT 1`);
+    let eventoId = eventoActualRes.rows[0]?.id;
+    if (!eventoId) {
+      const abiertoRes = await client.query(`SELECT id FROM eventos WHERE abierto = true LIMIT 1`);
+      eventoId = abiertoRes.rows[0]?.id;
+    }
+    if (eventoId) {
+      const ocupante = await client.query(
+        `DELETE FROM habitacion_ocupantes WHERE participante_id = $1 AND evento_id = $2 RETURNING habitacion_id`,
+        [id, eventoId]
+      );
+      if (ocupante.rows.length > 0) {
+        const habitacionId = ocupante.rows[0].habitacion_id;
+        const restantes = await client.query(
+          `SELECT COUNT(*) FROM habitacion_ocupantes WHERE habitacion_id = $1 AND evento_id = $2`,
+          [habitacionId, eventoId]
+        );
+        if (parseInt(restantes.rows[0].count, 10) === 0) {
+          await client.query(
+            `DELETE FROM habitacion_reservas WHERE habitacion_id = $1 AND evento_id = $2 AND es_reserva_seguridad = false`,
+            [habitacionId, eventoId]
+          );
+        }
+      }
+    }
+
+    await client.query('COMMIT');
     res.json({ ok: true });
   } catch (err) {
+    await client.query('ROLLBACK');
     console.error('Error en PUT /admin/participantes/:id/ocultar:', err);
     res.status(500).json({ error: 'No se pudo ocultar al participante.' });
+  } finally {
+    client.release();
   }
 });
 
@@ -540,6 +579,29 @@ router.delete('/admin/inscripciones/:id', requireAuth, requireModulo('participan
       [fila.id, fila.participante_id, fila.evento_id, JSON.stringify(fila)]
     );
     await client.query(`DELETE FROM inscripciones WHERE id = $1`, [id]);
+
+    // Si tenía habitación asignada para este evento, se libera junto con
+    // la inscripción — de lo contrario quedaría apareciendo como
+    // ocupante de una habitación sin estar ya inscrito. Si la habitación
+    // se queda sin nadie, también se limpia su cobro (mismo criterio que
+    // ya usa el módulo de Habitaciones al quitar al último ocupante).
+    const ocupante = await client.query(
+      `DELETE FROM habitacion_ocupantes WHERE participante_id = $1 AND evento_id = $2 RETURNING habitacion_id`,
+      [fila.participante_id, fila.evento_id]
+    );
+    if (ocupante.rows.length > 0) {
+      const habitacionId = ocupante.rows[0].habitacion_id;
+      const restantes = await client.query(
+        `SELECT COUNT(*) FROM habitacion_ocupantes WHERE habitacion_id = $1 AND evento_id = $2`,
+        [habitacionId, fila.evento_id]
+      );
+      if (parseInt(restantes.rows[0].count, 10) === 0) {
+        await client.query(
+          `DELETE FROM habitacion_reservas WHERE habitacion_id = $1 AND evento_id = $2 AND es_reserva_seguridad = false`,
+          [habitacionId, fila.evento_id]
+        );
+      }
+    }
 
     await client.query('COMMIT');
     res.json({ ok: true });
