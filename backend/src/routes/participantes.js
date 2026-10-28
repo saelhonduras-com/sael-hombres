@@ -528,7 +528,8 @@ router.get('/admin/eventos/:evento_id/inscripciones', requireAuth, requireModulo
     const { rows } = await pool.query(
       `SELECT i.id AS inscripcion_id, i.registrado_presencial,
               p.id AS participante_id, p.nombre_completo, p.numero_identificacion,
-              p.tipo_identificacion, p.tipo_participante, p.capitulo, p.zona
+              p.tipo_identificacion, p.tipo_participante, p.capitulo, p.zona,
+              p.departamento, p.municipio
        FROM inscripciones i
        JOIN participantes p ON p.id = i.participante_id
        WHERE ${condiciones.join(' AND ')}
@@ -864,7 +865,7 @@ router.put('/admin/inscripciones/:id/presencial', requireAuth, requireModulo('pa
 // solo cuando ese total da exactamente 1.
 async function obtenerFilasDiplomas(evento_id) {
   const { rows } = await pool.query(
-    `SELECT p.zona, p.capitulo, p.nombre_completo, p.veces_saeles_previas,
+    `SELECT p.zona, p.capitulo, p.departamento, p.municipio, p.nombre_completo, p.veces_saeles_previas,
             i.alimentacion_monto, i.metodo_pago, i.observaciones_pago,
             (SELECT COUNT(*) FROM inscripciones i2
                WHERE i2.participante_id = p.id AND i2.registrado_presencial = true) AS confirmadas
@@ -876,6 +877,7 @@ async function obtenerFilasDiplomas(evento_id) {
   );
   const conPrimeraVez = rows.map((r) => ({
     ...r,
+    procedencia: r.departamento ? `${r.departamento}${r.municipio ? ', ' + r.municipio : ''}` : '',
     total_saeles: (r.veces_saeles_previas || 0) + parseInt(r.confirmadas, 10),
   }));
   const total_primera_vez = conPrimeraVez.filter((r) => r.total_saeles === 1).length;
@@ -908,6 +910,7 @@ router.get('/admin/eventos/:evento_id/diplomas', requireAuth, requireModulo('dip
         numero: i + 1,
         zona: r.zona,
         capitulo: r.capitulo || '',
+        procedencia: r.procedencia,
         nombre_completo: r.nombre_completo,
         primera_vez: r.total_saeles === 1,
         metodo_pago: r.metodo_pago,
@@ -936,6 +939,7 @@ router.get('/admin/eventos/:evento_id/diplomas/excel', requireAuth, requireModul
       '#': i + 1,
       ZONA: r.zona,
       CAPÍTULO: r.capitulo || '',
+      PROCEDENCIA: r.procedencia,
       NOMBRE: r.nombre_completo,
       '1ER SAEL': r.total_saeles === 1 ? '1' : '',
       Efectivo: r.metodo_pago === 'efectivo' && r.alimentacion_monto ? Number(r.alimentacion_monto) : '',
@@ -1018,16 +1022,17 @@ router.get('/admin/eventos/:evento_id/diplomas/pdf', requireAuth, requireModulo(
     }
 
     // Tabla centrada horizontalmente en la página, columnas también
-    // centradas (encabezados y datos por igual). Se achicaron las 5
-    // columnas originales para que quepan las 3 nuevas de método de pago
-    // sin salirse de la hoja vertical.
-    const anchoCol = { num: 22, zona: 62, capitulo: 62, nombre: 108, primera: 42, efectivo: 62, transferencia: 72, tarjeta: 62 };
+    // centradas (encabezados y datos por igual). Se achicaron un poco
+    // zona/capítulo/nombre para que quepa también la columna nueva de
+    // Procedencia, sin salirse de la hoja vertical.
+    const anchoCol = { num: 20, zona: 55, capitulo: 55, procedencia: 68, nombre: 92, primera: 38, efectivo: 60, transferencia: 70, tarjeta: 58 };
     const anchoTabla = Object.values(anchoCol).reduce((a, b) => a + b, 0);
     const inicioTabla = (anchoPagina - anchoTabla) / 2;
     const col = { num: inicioTabla };
     col.zona = col.num + anchoCol.num;
     col.capitulo = col.zona + anchoCol.zona;
-    col.nombre = col.capitulo + anchoCol.capitulo;
+    col.procedencia = col.capitulo + anchoCol.capitulo;
+    col.nombre = col.procedencia + anchoCol.procedencia;
     col.primera = col.nombre + anchoCol.nombre;
     col.efectivo = col.primera + anchoCol.primera;
     col.transferencia = col.efectivo + anchoCol.efectivo;
@@ -1050,6 +1055,7 @@ router.get('/admin/eventos/:evento_id/diplomas/pdf', requireAuth, requireModulo(
       celda('#', col.num, y, anchoCol.num);
       celda('ZONA', col.zona, y, anchoCol.zona, 'left');
       celda('CAPÍTULO', col.capitulo, y, anchoCol.capitulo, 'left');
+      celda('PROCEDENCIA', col.procedencia, y, anchoCol.procedencia, 'left');
       celda('NOMBRE', col.nombre, y, anchoCol.nombre, 'left');
       celda('1ER SAEL', col.primera, y, anchoCol.primera);
       celda('EFECTIVO', col.efectivo, y, anchoCol.efectivo);
@@ -1070,8 +1076,9 @@ router.get('/admin/eventos/:evento_id/diplomas/pdf', requireAuth, requireModulo(
       // decidir la altura de la fila, o se encima con la siguiente.
       const alturaZona = doc.heightOfString(r.zona || '', { width: anchoCol.zona });
       const alturaCapitulo = doc.heightOfString(r.capitulo || '', { width: anchoCol.capitulo });
+      const alturaProcedencia = doc.heightOfString(r.procedencia || '', { width: anchoCol.procedencia });
       const alturaNombre = doc.heightOfString(r.nombre_completo, { width: anchoCol.nombre });
-      const alturaDatos = Math.max(alturaZona, alturaCapitulo, alturaNombre, 10);
+      const alturaDatos = Math.max(alturaZona, alturaCapitulo, alturaProcedencia, alturaNombre, 10);
 
       // Observación de pago (ej. motivo de una cortesía) — se agrega como
       // una notita debajo del nombre solo cuando esa persona tiene algo
@@ -1092,6 +1099,7 @@ router.get('/admin/eventos/:evento_id/diplomas/pdf', requireAuth, requireModulo(
       celda(String(i + 1), col.num, y, anchoCol.num);
       celdaEnvuelta(r.zona || '', col.zona, y, anchoCol.zona);
       celdaEnvuelta(r.capitulo || '', col.capitulo, y, anchoCol.capitulo);
+      celdaEnvuelta(r.procedencia || '', col.procedencia, y, anchoCol.procedencia);
       celdaEnvuelta(r.nombre_completo, col.nombre, y, anchoCol.nombre);
       celda(r.total_saeles === 1 ? '1' : '', col.primera, y, anchoCol.primera);
       celda(r.metodo_pago === 'efectivo' && r.alimentacion_monto ? `L.${r.alimentacion_monto}` : '', col.efectivo, y, anchoCol.efectivo);
@@ -1118,7 +1126,7 @@ router.get('/admin/eventos/:evento_id/diplomas/pdf', requireAuth, requireModulo(
     doc.y += 8;
     const yTotalesDiplomas = doc.y;
     doc.font('Helvetica-Bold').fontSize(8).fillColor('#1F3464');
-    celda('TOTALES', col.capitulo, yTotalesDiplomas, anchoCol.capitulo + anchoCol.nombre, 'left');
+    celda('TOTALES', col.capitulo, yTotalesDiplomas, anchoCol.capitulo + anchoCol.procedencia + anchoCol.nombre, 'left');
     celda(String(total_primera_vez), col.primera, yTotalesDiplomas, anchoCol.primera);
     celda(`L.${totalesPago.efectivo.toFixed(2)}`, col.efectivo, yTotalesDiplomas, anchoCol.efectivo);
     celda(`L.${totalesPago.transferencia.toFixed(2)}`, col.transferencia, yTotalesDiplomas, anchoCol.transferencia);

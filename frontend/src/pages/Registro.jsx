@@ -3,7 +3,7 @@ import { useNavigate, Link } from 'react-router-dom';
 import api, { mensajeError } from '../api';
 import {
   DEPARTAMENTOS_HONDURAS, MUNICIPIOS_POR_DEPARTAMENTO,
-  ZONAS_FIHNEC, CARGOS_FIHNEC, ESTADOS_CIVILES,
+  ZONAS_FIHNEC, ZONAS_POR_DEPARTAMENTO, CARGOS_FIHNEC, ESTADOS_CIVILES,
 } from '../listas';
 
 const TOTAL_PASOS = 6;
@@ -207,6 +207,11 @@ export default function Registro() {
   const eventoActual = eventos?.find((ev) => ev.es_actual && ev.abierto) || eventos?.find((ev) => ev.abierto) || null;
   const municipiosDisponibles = form.departamento ? (MUNICIPIOS_POR_DEPARTAMENTO[form.departamento] || []) : [];
   const municipiosEdicion = formEdicion?.departamento ? (MUNICIPIOS_POR_DEPARTAMENTO[formEdicion.departamento] || []) : [];
+  // Si el departamento elegido no tiene zonas asignadas en el catálogo
+  // (ej. Gracias a Dios), se muestra la lista completa de zonas en vez de
+  // dejar el selector vacío y sin opciones.
+  const zonasDisponibles = form.departamento ? (ZONAS_POR_DEPARTAMENTO[form.departamento] || ZONAS_FIHNEC) : ZONAS_FIHNEC;
+  const zonasEdicion = formEdicion?.departamento ? (ZONAS_POR_DEPARTAMENTO[formEdicion.departamento] || ZONAS_FIHNEC) : ZONAS_FIHNEC;
 
   function actualizar(campo, valor) {
     setForm((f) => ({ ...f, [campo]: valor }));
@@ -557,7 +562,7 @@ export default function Registro() {
               <Campo etiqueta="Departamento">
                 <select
                   value={formEdicion.departamento}
-                  onChange={(e) => setFormEdicion((f) => ({ ...f, departamento: e.target.value, municipio: '' }))}
+                  onChange={(e) => setFormEdicion((f) => ({ ...f, departamento: e.target.value, municipio: '', zona: '' }))}
                   className={claseInput}
                 >
                   <option value="">Selecciona…</option>
@@ -574,9 +579,9 @@ export default function Registro() {
                 <input type="text" value={formEdicion.capitulo} onChange={(e) => setFormEdicion((f) => ({ ...f, capitulo: e.target.value }))} className={claseInput} placeholder="Nombre de tu capítulo" />
               </Campo>
               <Campo etiqueta="Zona">
-                <select value={formEdicion.zona} onChange={(e) => setFormEdicion((f) => ({ ...f, zona: e.target.value }))} className={claseInput}>
-                  <option value="">Selecciona…</option>
-                  {ZONAS_FIHNEC.map((z) => <option key={z}>{z}</option>)}
+                <select value={formEdicion.zona} onChange={(e) => setFormEdicion((f) => ({ ...f, zona: e.target.value }))} disabled={!formEdicion.departamento} className={`${claseInput} disabled:bg-ink/5`}>
+                  <option value="">{formEdicion.departamento ? 'Selecciona…' : 'Primero elige un departamento'}</option>
+                  {zonasEdicion.map((z) => <option key={z}>{z}</option>)}
                 </select>
               </Campo>
               <Campo etiqueta="Cargo en FIHNEC">
@@ -741,7 +746,7 @@ export default function Registro() {
               <Campo etiqueta="Departamento">
                 <select
                   value={form.departamento}
-                  onChange={(e) => setForm((f) => ({ ...f, departamento: e.target.value, municipio: '' }))}
+                  onChange={(e) => setForm((f) => ({ ...f, departamento: e.target.value, municipio: '', zona: '' }))}
                   className={claseInput}
                 >
                   <option value="">Selecciona…</option>
@@ -758,9 +763,9 @@ export default function Registro() {
                 <input type="text" value={form.capitulo} onChange={(e) => actualizar('capitulo', e.target.value)} className={claseInput} placeholder="Nombre de tu capítulo" />
               </Campo>
               <Campo etiqueta="Zona">
-                <select value={form.zona} onChange={(e) => actualizar('zona', e.target.value)} className={claseInput}>
-                  <option value="">Selecciona…</option>
-                  {ZONAS_FIHNEC.map((z) => <option key={z}>{z}</option>)}
+                <select value={form.zona} onChange={(e) => actualizar('zona', e.target.value)} disabled={!form.departamento} className={`${claseInput} disabled:bg-ink/5`}>
+                  <option value="">{form.departamento ? 'Selecciona…' : 'Primero elige un departamento'}</option>
+                  {zonasDisponibles.map((z) => <option key={z}>{z}</option>)}
                 </select>
               </Campo>
               <div className="flex justify-between pt-2">

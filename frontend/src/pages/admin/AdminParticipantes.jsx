@@ -587,13 +587,14 @@ export default function AdminParticipantes() {
                               <th className="px-4 py-3">Identificación</th>
                               <th className="px-4 py-3">Capítulo</th>
                               <th className="px-4 py-3">Zona</th>
+                              <th className="px-4 py-3">Procedencia</th>
                               <th className="px-4 py-3 text-center">Registrado</th>
                               <th className="px-4 py-3"></th>
                             </tr>
                           </thead>
                           <tbody>
                             {inscripcionesActual.length === 0 && (
-                              <tr><td colSpan={6} className="px-4 py-6 text-center text-ink/40">Nadie se ha inscrito todavía a este evento.</td></tr>
+                              <tr><td colSpan={7} className="px-4 py-6 text-center text-ink/40">Nadie se ha inscrito todavía a este evento.</td></tr>
                             )}
                             {inscripcionesActual.map((i) => (
                               <tr key={i.inscripcion_id} className="border-b border-ink/5 last:border-0">
@@ -606,6 +607,7 @@ export default function AdminParticipantes() {
                                 <td className="px-4 py-3 text-ink/60">{i.tipo_identificacion}: {i.numero_identificacion}</td>
                                 <td className="px-4 py-3 text-ink/60">{i.capitulo || '—'}</td>
                                 <td className="px-4 py-3 text-ink/60">{i.zona}</td>
+                                <td className="px-4 py-3 text-ink/60">{i.departamento ? `${i.departamento}${i.municipio ? ', ' + i.municipio : ''}` : '—'}</td>
                                 <td className="px-4 py-3 text-center">
                                   <input
                                     type="checkbox"
@@ -682,12 +684,13 @@ export default function AdminParticipantes() {
                           <th className="px-4 py-3">Tipo</th>
                           <th className="px-4 py-3">Capítulo</th>
                           <th className="px-4 py-3">Zona</th>
+                          <th className="px-4 py-3">Procedencia</th>
                           <th className="px-4 py-3"></th>
                         </tr>
                       </thead>
                       <tbody>
                         {participantes.length === 0 && (
-                          <tr><td colSpan={6} className="px-4 py-6 text-center text-ink/40">No se encontraron participantes con esos filtros.</td></tr>
+                          <tr><td colSpan={7} className="px-4 py-6 text-center text-ink/40">No se encontraron participantes con esos filtros.</td></tr>
                         )}
                         {participantes.map((p) => (
                           <tr key={p.id} className="border-b border-ink/5 last:border-0">
@@ -701,6 +704,7 @@ export default function AdminParticipantes() {
                             <td className="px-4 py-3 text-ink/60 capitalize">{p.tipo_participante}</td>
                             <td className="px-4 py-3 text-ink/60">{p.capitulo || '—'}</td>
                             <td className="px-4 py-3 text-ink/60">{p.zona}</td>
+                            <td className="px-4 py-3 text-ink/60">{p.departamento ? `${p.departamento}${p.municipio ? ', ' + p.municipio : ''}` : '—'}</td>
                             <td className="px-4 py-3 text-right whitespace-nowrap">
                               <button onClick={() => abrirDetalle(p.id)} className={btnVer}>Ver detalle</button>
                               <button

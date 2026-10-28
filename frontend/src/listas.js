@@ -75,6 +75,34 @@ export const ZONAS_FIHNEC = [
   "Sur a"
 ];
 
+// Qué Zonas de SAEL Hombres corresponden a cada Departamento — según el
+// Excel "Zonas de Inscripciones Hombres y Damas" que envió Carlos
+// (columna "ubicación" de cada zona, llevada al Departamento de Honduras
+// al que pertenece ese lugar). Se usa para filtrar Zona igual que ya se
+// filtra Municipio al elegir Departamento.
+// "Gracias a Dios" no tiene ninguna zona asignada en el Excel — si se
+// elige ese departamento, el formulario muestra el catálogo completo de
+// Zonas en vez de dejar el selector vacío y bloqueado.
+export const ZONAS_POR_DEPARTAMENTO = {
+  "Atlántida": ["Atlántica 1", "Atlántica 2"],
+  "Choluteca": ["Sur a"],
+  "Colón": ["Aguán 2"],
+  "Comayagua": ["Centro Occidente 1", "Centro Occidente 4"],
+  "Copán": ["Occidente 1", "Occidente 5"],
+  "Cortés": ["Norte 1", "Norte 2", "Norte 3"],
+  "El Paraíso": ["Oriental 2"],
+  "Francisco Morazán": ["Central 1a", "Central 1b", "Central 2", "Central 3", "Central 4"],
+  "Intibucá": ["Centro Occidente 3"],
+  "Islas de la Bahía": ["Atlántica Insular"],
+  "La Paz": ["Centro Occidente 2a", "Centro Occidente 2b"],
+  "Lempira": ["Occidente 3", "Occidente 4a", "Occidente 4b"],
+  "Ocotepeque": ["Occidente 2"],
+  "Olancho": ["Oriental 1a", "Oriental 1b", "Oriental 1c"],
+  "Santa Bárbara": ["Nor Occidente"],
+  "Valle": ["Sur a"],
+  "Yoro": ["Aguán 1", "Aguán 3", "Norte 4"],
+};
+
 // Igual al catálogo de SFL, sin "Servidor del SFL" (no aplica a SAEL) —
 // se usa para "Cargo actual" del participante y también del Saelista.
 export const CARGOS_FIHNEC = [
