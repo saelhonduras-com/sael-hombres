@@ -56,10 +56,28 @@ function fechaDMA(fechaISO) {
 const claseInput = 'w-full rounded-lg border border-ink/15 px-3 py-2 text-sm focus:border-ember focus:outline-none';
 const claseFiltro = 'w-48 rounded-lg border border-ink/15 px-3 py-1.5 text-xs focus:border-ember focus:outline-none';
 
-function claseTab(activa) {
-  return `rounded-full px-4 py-2 text-sm font-semibold transition ${
-    activa ? 'bg-ink text-white' : 'border border-ink/20 text-ink/70 hover:bg-ink/5'
-  }`;
+const COLORES_TAB = {
+  celeste: {
+    on: 'bg-night-2 text-white border border-night-2',
+    off: 'border border-night-2/40 bg-night-2/10 text-night-2 hover:bg-night-2/20',
+  },
+  azul: {
+    on: 'bg-night text-white border border-night',
+    off: 'border border-night/40 bg-night/10 text-night hover:bg-night/20',
+  },
+  oro: {
+    on: 'bg-gold text-night border border-gold',
+    off: 'border border-gold bg-gold/25 text-night hover:bg-gold/45',
+  },
+};
+
+function claseTab(activa, color = 'azul') {
+  return `rounded-full px-4 py-2 text-sm font-semibold transition ${COLORES_TAB[color][activa ? 'on' : 'off']}`;
+}
+
+// Muestra siempre el tipo y el número: "DNI: …", "Pasaporte: …" o "Código interno: …".
+function textoIdentificacion(tipo, numero) {
+  return tipo ? `${tipo}: ${numero}` : numero;
 }
 
 // Botones de acción en filas de tabla y en el detalle. Paleta a propósito:
@@ -98,6 +116,8 @@ export default function AdminParticipantes() {
   const [registradosActual, setRegistradosActual] = useState(0);
   const [cargandoActual, setCargandoActual] = useState(true);
   const [buscarActual, setBuscarActual] = useState('');
+  const [paginaActual, setPaginaActual] = useState(1);
+  const [porPaginaActual, setPorPaginaActual] = useState(25);
   const buscarActualRef = useRef(buscarActual);
   useEffect(() => { buscarActualRef.current = buscarActual; }, [buscarActual]);
 
@@ -610,6 +630,8 @@ export default function AdminParticipantes() {
     });
     return lista.sort((x, y) => (x.dia - y.dia) || x.nombre_completo.localeCompare(y.nombre_completo));
   })();
+  const totalPaginasActual = Math.max(1, Math.ceil(inscripcionesActual.length / porPaginaActual));
+  const paginaActualSegura = Math.min(paginaActual, totalPaginasActual);
   const idsCumpleaneros = new Set(cumpleaneros.map((c) => c.participante_id));
   // Honduras es UTC-6 todo el año
   const hoyHN = new Date(Date.now() - 6 * 60 * 60 * 1000).toISOString().slice(0, 10);
@@ -675,16 +697,6 @@ export default function AdminParticipantes() {
     <div>
       <div className="flex items-center justify-between">
         <h1 className="font-display text-2xl font-bold text-ink">Participantes</h1>
-        {vista === 'lista' && (
-          <div className="flex flex-wrap gap-2">
-            <button onClick={abrirMenor} className="rounded-full bg-[#007334] px-5 py-2 text-sm font-semibold text-white hover:bg-[#005c29]">
-              + Agregar menor
-            </button>
-            <button onClick={abrirExtranjero} className="rounded-full bg-[#007334] px-5 py-2 text-sm font-semibold text-white hover:bg-[#005c29]">
-              + Agregar extranjero
-            </button>
-          </div>
-        )}
       </div>
 
       {error && !cobrando && <p className="mt-4 rounded-lg bg-ember/10 p-3 text-sm text-ember">{error}</p>}
@@ -694,21 +706,27 @@ export default function AdminParticipantes() {
           <div>
             <div className="flex flex-wrap items-center justify-between gap-2">
               <div className="flex flex-wrap gap-2">
-                <button onClick={() => setModoLista('actual')} className={claseTab(modoLista === 'actual')}>
+                <button onClick={() => setModoLista('actual')} className={claseTab(modoLista === 'actual', 'celeste')}>
                   ★ Inscribiéndose ahora
                 </button>
-                <button onClick={() => setModoLista('todos')} className={claseTab(modoLista === 'todos')}>
+                <button onClick={() => setModoLista('todos')} className={claseTab(modoLista === 'todos', 'azul')}>
                   Todos los participantes
+                </button>
+                <button onClick={() => setModoLista('cumple')} className={claseTab(modoLista === 'cumple', 'oro')}>
+                  🎂 Cumpleañeros ({cumpleaneros.length})
                 </button>
               </div>
               <div className="flex flex-wrap gap-2">
-                <button onClick={() => setModoLista('cumple')} className={claseTab(modoLista === 'cumple')}>
-                  🎂 Cumpleañeros ({cumpleaneros.length})
+                <button onClick={abrirMenor} className="rounded-full bg-[#007334] px-5 py-2 text-sm font-semibold text-white hover:bg-[#005c29]">
+                  + Agregar menor
+                </button>
+                <button onClick={abrirExtranjero} className="rounded-full bg-[#007334] px-5 py-2 text-sm font-semibold text-white hover:bg-[#005c29]">
+                  + Agregar extranjero
                 </button>
                 <button
                   onClick={refrescarListaActual}
                   title="Refrescar (también se actualiza solo cada 30 segundos)"
-                  className="rounded-full border border-ink/20 px-4 py-2 text-sm font-semibold text-ink/70 hover:bg-ink/5"
+                  className="rounded-full border border-ember-light/50 bg-ember-light/15 px-4 py-2 text-sm font-semibold text-ember hover:bg-ember-light/30"
                 >
                   ↻ Refrescar
                 </button>
@@ -721,51 +739,51 @@ export default function AdminParticipantes() {
                   <p className="mt-4 text-sm text-ink/40">No hay un evento SAEL marcado como actual/abierto en este momento.</p>
                 ) : (
                   <>
-                    <div className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-ink/10 bg-night px-4 py-3 text-white shadow-sm">
-                      <div>
-                        <p className="text-xs uppercase tracking-wide text-white/60">Evento actual</p>
-                        <p className="font-display text-lg font-bold">{eventoActual.nombre}</p>
-                      </div>
-                      <div className="flex items-center gap-4">
-                        <p className="text-sm">
-                          <span className="font-display text-2xl font-bold">{registradosActual}</span>
+                    <div className="mt-3 flex flex-wrap items-center gap-x-5 gap-y-3 rounded-2xl border border-ink/10 bg-white px-4 py-3 shadow-sm">
+                      <form
+                        onSubmit={(e) => { setPaginaActual(1); buscarEnEventoActual(e); }}
+                        className="flex min-w-[260px] flex-1 flex-wrap items-center gap-2"
+                      >
+                        <input
+                          type="text"
+                          value={buscarActual}
+                          onChange={(e) => setBuscarActual(e.target.value)}
+                          placeholder="Buscar por nombre o identificación"
+                          className={`${claseInput} flex-1 min-w-[180px]`}
+                        />
+                        <button type="submit" className="rounded-full bg-[#007334] px-5 py-2 text-sm font-semibold text-white hover:bg-[#005c29]">
+                          Buscar
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => { setBuscarActual(''); setPaginaActual(1); cargarInscripcionesEventoActual(''); }}
+                          className="rounded-full border border-night-2/40 bg-night-2/10 px-4 py-2 text-sm font-semibold text-night hover:bg-night-2/20"
+                        >
+                          Limpiar
+                        </button>
+                      </form>
+
+                      <button
+                        onClick={finalizarEventoActual}
+                        className="rounded-full bg-ember px-4 py-2 text-xs font-bold text-white shadow-sm hover:bg-ember-light"
+                      >
+                        Finalizar evento
+                      </button>
+
+                      <div className="flex min-w-[340px] items-center justify-between gap-5 rounded-xl bg-night px-6 py-2.5 text-white">
+                        <div>
+                          <p className="text-[10px] uppercase tracking-wide text-white/60">Evento actual</p>
+                          <p className="font-display text-base font-bold leading-tight">{eventoActual.nombre}</p>
+                        </div>
+                        <p className="border-l border-white/20 pl-3 text-sm">
+                          <span className="font-display text-xl font-bold">{registradosActual}</span>
                           <span className="text-white/60"> / {totalActual} registrados</span>
                         </p>
-                        <button
-                          onClick={finalizarEventoActual}
-                          className="rounded-full bg-ember px-4 py-1.5 text-xs font-semibold text-white hover:bg-ember-light"
-                        >
-                          Finalizar evento actual
-                        </button>
                       </div>
                     </div>
 
-                    <form onSubmit={buscarEnEventoActual} className="mt-4 flex flex-wrap gap-3 rounded-2xl border border-ink/10 bg-white p-4 shadow-sm">
-                      <input
-                        type="text"
-                        value={buscarActual}
-                        onChange={(e) => setBuscarActual(e.target.value)}
-                        placeholder="Buscar por nombre o identificación"
-                        className={`${claseInput} flex-1 min-w-[200px]`}
-                      />
-                      <button type="submit" className="rounded-full bg-[#007334] px-5 py-2 text-sm font-semibold text-white hover:bg-[#005c29]">
-                        Buscar
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => { setBuscarActual(''); cargarInscripcionesEventoActual(''); }}
-                        className="rounded-full border border-ink/20 px-5 py-2 text-sm font-semibold text-ink/70 hover:bg-ink/5"
-                      >
-                        Limpiar filtros
-                      </button>
-                    </form>
-
-                    <p className="mt-2 text-xs text-ink/50">
-                      Marca "Registrado" cuando la persona llegue físicamente al evento.
-                    </p>
-
                     {cargandoActual ? <p className="mt-6 text-ink/40">Cargando…</p> : (
-                      <div className="mt-2 overflow-x-auto rounded-2xl border border-ink/10 bg-white shadow-sm">
+                      <div className="mt-3 overflow-x-auto rounded-2xl border border-ink/10 bg-white shadow-sm">
                         <table className="w-full text-sm">
                           <thead>
                             <tr className="border-b border-ink/10 bg-[#1F3464]/12 text-left text-xs uppercase tracking-wide text-[#1F3464]">
@@ -782,7 +800,7 @@ export default function AdminParticipantes() {
                             {inscripcionesActual.length === 0 && (
                               <tr><td colSpan={7} className="px-4 py-6 text-center text-ink/40">Nadie se ha inscrito todavía a este evento.</td></tr>
                             )}
-                            {inscripcionesActual.map((i) => (
+                            {inscripcionesActual.slice((paginaActualSegura - 1) * porPaginaActual, paginaActualSegura * porPaginaActual).map((i) => (
                               <tr key={i.inscripcion_id} className="border-b border-ink/5 last:border-0">
                                 <td className="px-4 py-3 font-medium text-ink">
                                   {i.nombre_completo}
@@ -796,7 +814,7 @@ export default function AdminParticipantes() {
                                     <span title="Cumple años durante el evento" className="ml-2">🎂</span>
                                   )}
                                 </td>
-                                <td className="px-4 py-3 text-ink/60">{i.tipo_identificacion}: {i.numero_identificacion}</td>
+                                <td className="px-4 py-3 text-ink/60">{textoIdentificacion(i.tipo_identificacion, i.numero_identificacion)}</td>
                                 <td className="px-4 py-3 text-ink/60">{i.capitulo || '—'}</td>
                                 <td className="px-4 py-3 text-ink/60">{i.zona}</td>
                                 <td className="px-4 py-3 text-ink/60">{i.departamento ? `${i.departamento}${i.municipio ? ', ' + i.municipio : ''}` : '—'}</td>
@@ -828,8 +846,45 @@ export default function AdminParticipantes() {
                             ))}
                           </tbody>
                         </table>
+                        {inscripcionesActual.length > 0 && (
+                          <div className="flex flex-wrap items-center justify-between gap-3 border-t border-ink/10 px-4 py-3 text-sm text-ink/70">
+                            <p>
+                              Mostrando {(paginaActualSegura - 1) * porPaginaActual + 1}–{Math.min(paginaActualSegura * porPaginaActual, inscripcionesActual.length)} de {inscripcionesActual.length}
+                            </p>
+                            <div className="flex flex-wrap items-center gap-2">
+                              <label className="flex items-center gap-1 text-xs">
+                                Por página
+                                <select
+                                  value={porPaginaActual}
+                                  onChange={(e) => { setPorPaginaActual(Number(e.target.value)); setPaginaActual(1); }}
+                                  className="rounded-lg border border-ink/20 bg-white px-2 py-1 text-sm"
+                                >
+                                  {[25, 50, 100].map((n) => <option key={n} value={n}>{n}</option>)}
+                                </select>
+                              </label>
+                              <button
+                                onClick={() => setPaginaActual(Math.max(1, paginaActualSegura - 1))}
+                                disabled={paginaActualSegura <= 1}
+                                className="rounded-full border border-ink/20 px-3 py-1 font-semibold hover:bg-ink/5 disabled:opacity-40"
+                              >
+                                ← Anterior
+                              </button>
+                              <span className="text-xs">Página {paginaActualSegura} de {totalPaginasActual}</span>
+                              <button
+                                onClick={() => setPaginaActual(Math.min(totalPaginasActual, paginaActualSegura + 1))}
+                                disabled={paginaActualSegura >= totalPaginasActual}
+                                className="rounded-full border border-ink/20 px-3 py-1 font-semibold hover:bg-ink/5 disabled:opacity-40"
+                              >
+                                Siguiente →
+                              </button>
+                            </div>
+                          </div>
+                        )}
                       </div>
                     )}
+                    <p className="mt-2 text-xs text-ink/50">
+                      Marca "Registrado" cuando la persona llegue físicamente al evento.
+                    </p>
                   </>
                 )}
               </div>
@@ -946,7 +1001,7 @@ export default function AdminParticipantes() {
                     <button type="submit" className="ml-auto rounded-full bg-[#007334] px-4 py-1.5 text-xs font-semibold text-white hover:bg-[#005c29]">
                       Buscar
                     </button>
-                    <button type="button" onClick={limpiarFiltros} className="rounded-full border border-ink/20 px-4 py-1.5 text-xs font-semibold text-ink/70 hover:bg-ink/5">
+                    <button type="button" onClick={limpiarFiltros} className="rounded-full border border-night-2/40 bg-night-2/10 px-4 py-1.5 text-xs font-semibold text-night hover:bg-night-2/20">
                       Limpiar filtros
                     </button>
                   </div>
@@ -981,7 +1036,7 @@ export default function AdminParticipantes() {
                                 <span className="ml-2 rounded-full bg-gold/30 px-2 py-0.5 text-xs font-semibold text-night">Menor</span>
                               )}
                             </td>
-                            <td className="px-4 py-3 text-ink/60">{p.tipo_identificacion}: {p.numero_identificacion}</td>
+                            <td className="px-4 py-3 text-ink/60">{textoIdentificacion(p.tipo_identificacion, p.numero_identificacion)}</td>
                             <td className="px-4 py-3 text-ink/60 capitalize">{p.tipo_participante}</td>
                             <td className="px-4 py-3 text-ink/60">{p.capitulo || '—'}</td>
                             <td className="px-4 py-3 text-ink/60">{p.zona}</td>
@@ -1032,7 +1087,7 @@ export default function AdminParticipantes() {
           </div>
 
           <dl className="mt-4 grid gap-3 text-sm sm:grid-cols-2">
-            <div><dt className="text-ink/50">Identificación</dt><dd className="font-medium text-ink">{seleccionado.tipo_identificacion}: {seleccionado.numero_identificacion}</dd></div>
+            <div><dt className="text-ink/50">Identificación</dt><dd className="font-medium text-ink">{textoIdentificacion(seleccionado.tipo_identificacion, seleccionado.numero_identificacion)}</dd></div>
             <div><dt className="text-ink/50">Tipo</dt><dd className="font-medium text-ink capitalize">{seleccionado.tipo_participante}</dd></div>
             <div><dt className="text-ink/50">Fecha de nacimiento</dt><dd className="font-medium text-ink">{fechaDMA(seleccionado.fecha_nacimiento)}</dd></div>
             <div><dt className="text-ink/50">Teléfono</dt><dd className="font-medium text-ink">{seleccionado.telefono_movil || '—'}</dd></div>
