@@ -785,6 +785,195 @@ router.post('/admin/participantes/extranjero', requireAuth, requireModulo('parti
   }
 });
 
+// Admin: PDF de cumpleañeros del evento — mismo diseño que el PDF de Diplomas
+// (logo, encabezado, línea azul, tabla centrada). Incluye a los inscritos al
+// evento que cumplen años entre su primer y último día, agrupados por día
+// (viernes, sábado, domingo…) y en orden alfabético dentro de cada día.
+router.get('/admin/eventos/:evento_id/cumpleaneros/pdf', requireAuth, requireModulo('participantes', 'consulta'), async (req, res) => {
+  const { evento_id } = req.params;
+  try {
+    const evento = await pool.query(
+      `SELECT nombre, to_char(fecha_inicio, 'YYYY-MM-DD') AS fecha_inicio, to_char(fecha_fin, 'YYYY-MM-DD') AS fecha_fin
+       FROM eventos WHERE id = $1`,
+      [evento_id]
+    );
+    if (evento.rows.length === 0) {
+      return res.status(404).json({ error: 'El evento no existe.' });
+    }
+    const ev = evento.rows[0];
+
+    const { rows: inscritos } = await pool.query(
+      `SELECT p.nombre_completo, p.tipo_participante, p.capitulo, p.zona, p.departamento, p.municipio,
+              to_char(p.fecha_nacimiento, 'YYYY-MM-DD') AS fecha_nacimiento
+       FROM inscripciones i
+       JOIN participantes p ON p.id = i.participante_id
+       WHERE i.evento_id = $1 AND p.oculto = false AND p.fecha_nacimiento IS NOT NULL`,
+      [evento_id]
+    );
+
+    // Días del evento (UTC puro, sin zona horaria, para que no se corra un día).
+    const [a1, m1, d1] = ev.fecha_inicio.split('-').map(Number);
+    const [a2, m2, d2] = ev.fecha_fin.split('-').map(Number);
+    const dias = [];
+    let actual = Date.UTC(a1, m1 - 1, d1);
+    const fin = Date.UTC(a2, m2 - 1, d2);
+    for (let n = 0; actual <= fin && n < 31; n += 1, actual += 86400000) dias.push(new Date(actual));
+
+    const grupos = [];
+    inscritos.forEach((r) => {
+      const [an, mn, dn] = r.fecha_nacimiento.split('-').map(Number);
+      const dia = dias.find((d) => d.getUTCMonth() + 1 === mn && d.getUTCDate() === dn);
+      if (!dia) return;
+      const clave = dia.toISOString().slice(0, 10);
+      let grupo = grupos.find((g) => g.clave === clave);
+      if (!grupo) { grupo = { clave, dia, items: [] }; grupos.push(grupo); }
+      grupo.items.push({ ...r, edad: dia.getUTCFullYear() - an });
+    });
+    grupos.sort((x, y) => x.dia - y.dia);
+    grupos.forEach((g) => g.items.sort((x, y) => x.nombre_completo.localeCompare(y.nombre_completo, 'es')));
+    const total = grupos.reduce((acc, g) => acc + g.items.length, 0);
+
+    function textoDia(d) {
+      const t = d.toLocaleDateString('es-HN', { weekday: 'long', day: 'numeric', month: 'long', timeZone: 'UTC' });
+      return t.charAt(0).toUpperCase() + t.slice(1);
+    }
+    function fechaDMA(iso) {
+      const [a, m, d] = iso.split('-');
+      return `${d}/${m}/${a}`;
+    }
+
+    // Vertical (portrait), igual que Diplomas.
+    const doc = new PDFDocument({ size: 'letter', margin: 0, layout: 'portrait' });
+    if (pedidoEnMayusculas(req)) aplicarMayusculas(doc);
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="cumpleaneros_${ev.nombre.replace(/\s+/g, '_')}.pdf"`);
+    doc.pipe(res);
+
+    const margenX = 40;
+    const anchoPagina = doc.page.width;
+    const rutaLogo = require('path').join(__dirname, '..', 'assets', 'logo-fihnec-emblema.png');
+
+    function encabezadoPagina() {
+      const alturaEncabezado = 70;
+      const cajaLogo = 54;
+      const cajaX = margenX;
+      const cajaY = 8;
+      let xTexto;
+      try {
+        const anchoLogo = cajaLogo * (923 / 787);
+        doc.image(rutaLogo, cajaX, cajaY, { height: cajaLogo });
+        xTexto = cajaX + anchoLogo + 12;
+      } catch (e) {
+        xTexto = cajaX;
+      }
+      doc.fillColor('#1F3464').fontSize(16).text('SAEL Hombres · FIHNEC', xTexto, 18, { lineBreak: false });
+      doc.fontSize(10).fillColor('#E40521').text(`Cumpleañeros — ${ev.nombre}`, xTexto, 40, { lineBreak: false });
+
+      const anchoTotales = 220;
+      const xTotales = anchoPagina - margenX - anchoTotales;
+      doc.font('Helvetica-Bold').fontSize(10).fillColor('#1F3464')
+        .text(`TOTAL CUMPLEAÑEROS: ${total}`, xTotales, 18, { width: anchoTotales, align: 'right', lineBreak: false });
+      doc.fillColor('#E40521')
+        .text(`DEL ${fechaDMA(ev.fecha_inicio)} AL ${fechaDMA(ev.fecha_fin)}`, xTotales, 34, { width: anchoTotales, align: 'right', lineBreak: false });
+      doc.font('Helvetica');
+
+      doc.moveTo(0, alturaEncabezado).lineTo(anchoPagina, alturaEncabezado).lineWidth(3).strokeColor('#1F3464').stroke();
+      doc.lineWidth(1);
+      doc.y = alturaEncabezado + 20;
+    }
+
+    const anchoCol = { num: 22, nombre: 150, edad: 45, capitulo: 85, zona: 70, procedencia: 118 };
+    const anchoTabla = Object.values(anchoCol).reduce((a, b) => a + b, 0);
+    const inicioTabla = (anchoPagina - anchoTabla) / 2;
+    const col = { num: inicioTabla };
+    col.nombre = col.num + anchoCol.num;
+    col.edad = col.nombre + anchoCol.nombre;
+    col.capitulo = col.edad + anchoCol.edad;
+    col.zona = col.capitulo + anchoCol.capitulo;
+    col.procedencia = col.zona + anchoCol.zona;
+
+    function celda(texto, x, y, ancho, alineacion = 'center') {
+      doc.text(texto, x, y, { width: ancho, align: alineacion, ellipsis: true, lineBreak: false });
+    }
+    function celdaEnvuelta(texto, x, y, ancho) {
+      doc.text(texto, x, y, { width: ancho, align: 'left' });
+    }
+
+    function encabezadosTabla() {
+      const y = doc.y;
+      doc.fontSize(8).fillColor('#000000');
+      celda('#', col.num, y, anchoCol.num);
+      celda('NOMBRE', col.nombre, y, anchoCol.nombre, 'left');
+      celda('CUMPLE', col.edad, y, anchoCol.edad);
+      celda('CAPÍTULO', col.capitulo, y, anchoCol.capitulo, 'left');
+      celda('ZONA', col.zona, y, anchoCol.zona, 'left');
+      celda('PROCEDENCIA', col.procedencia, y, anchoCol.procedencia, 'left');
+      doc.y = y + 16;
+      doc.moveTo(inicioTabla, doc.y).lineTo(inicioTabla + anchoTabla, doc.y).strokeColor('#cccccc').stroke();
+      doc.y += 6;
+    }
+
+    function nuevaPagina() {
+      doc.addPage({ size: 'letter', margin: 0, layout: 'portrait' });
+      encabezadoPagina();
+      encabezadosTabla();
+    }
+
+    encabezadoPagina();
+    encabezadosTabla();
+
+    if (total === 0) {
+      doc.fontSize(9).fillColor('#666666')
+        .text('Nadie de los inscritos cumple años durante este evento.', inicioTabla, doc.y + 10, { width: anchoTabla, align: 'center' });
+    }
+
+    let numero = 0;
+    grupos.forEach((g) => {
+      // Banda con el día — así se lee "Viernes 27 de noviembre", "Sábado…", etc.
+      if (doc.y + 40 > doc.page.height - 40) nuevaPagina();
+      const yDia = doc.y;
+      doc.rect(inicioTabla, yDia - 2, anchoTabla, 14).fill('#FDF2C4');
+      doc.font('Helvetica-Bold').fontSize(8).fillColor('#1F3464');
+      doc.text(`${textoDia(g.dia)} · ${g.items.length}`, inicioTabla + 4, yDia + 1, { width: anchoTabla - 8, lineBreak: false });
+      doc.font('Helvetica');
+      doc.y = yDia + 18;
+
+      g.items.forEach((r) => {
+        numero += 1;
+        const procedencia = r.departamento ? `${r.departamento}${r.municipio ? ', ' + r.municipio : ''}` : '';
+        const nombre = r.tipo_participante === 'menor' ? `${r.nombre_completo} (menor)` : r.nombre_completo;
+        doc.fontSize(7).fillColor('#000000');
+        const alturaDatos = Math.max(
+          doc.heightOfString(nombre, { width: anchoCol.nombre }),
+          doc.heightOfString(r.capitulo || '', { width: anchoCol.capitulo }),
+          doc.heightOfString(r.zona || '', { width: anchoCol.zona }),
+          doc.heightOfString(procedencia, { width: anchoCol.procedencia }),
+          10
+        );
+        const altoFila = alturaDatos + 6;
+        if (doc.y + altoFila > doc.page.height - 40) {
+          nuevaPagina();
+          doc.fontSize(7).fillColor('#000000');
+        }
+        const y = doc.y;
+        celda(String(numero), col.num, y, anchoCol.num);
+        celdaEnvuelta(nombre, col.nombre, y, anchoCol.nombre);
+        celda(`${r.edad} años`, col.edad, y, anchoCol.edad);
+        celdaEnvuelta(r.capitulo || '', col.capitulo, y, anchoCol.capitulo);
+        celdaEnvuelta(r.zona || '', col.zona, y, anchoCol.zona);
+        celdaEnvuelta(procedencia, col.procedencia, y, anchoCol.procedencia);
+        doc.y = y + altoFila;
+      });
+    });
+
+    doc.end();
+  } catch (err) {
+    if (!res.headersSent) {
+      res.status(500).json({ error: 'No se pudo generar el PDF.' });
+    }
+  }
+});
+
 // Admin: agrega un MENOR de edad manualmente y lo inscribe de una vez al evento
 // indicado. Los menores normalmente no tienen DNI, así que el sistema les asigna
 // un código interno propio (MEN-00001…); el código lleva guion a propósito para

@@ -107,6 +107,8 @@ export default function AdminParticipantes() {
   const [formEditar, setFormEditar] = useState(null);
   const [formExtranjero, setFormExtranjero] = useState(vacioExtranjero);
   const [formMenor, setFormMenor] = useState(vacioMenor);
+  const [mayusculasCumple, setMayusculasCumple] = useState(false); // PDF de cumpleañeros: por defecto como está
+  const [descargandoCumple, setDescargandoCumple] = useState(''); // '' | 'imprimir' | 'descargar'
   // Lista completa (sin filtro de búsqueda) de inscritos al evento actual —
   // de aquí salen los cumpleañeros, para que no cambien al buscar a alguien.
   const [baseCumple, setBaseCumple] = useState([]);
@@ -631,39 +633,38 @@ export default function AdminParticipantes() {
     return c.departamento ? `${c.departamento}${c.municipio ? ', ' + c.municipio : ''}` : '—';
   }
 
-  // Abre una hoja limpia (solo encabezado del evento + la tabla) y lanza la impresión.
-  function imprimirCumpleaneros() {
-    const esc = (t) => String(t ?? '').replace(/[&<>"']/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]));
-    let n = 0;
-    const filas = gruposCumple.map((g) =>
-      `<tr class="dia"><td colspan="6">${esc(textoDia(g.dia))}</td></tr>` +
-      g.items.map((c) => {
-        n += 1;
-        return `<tr><td>${n}</td><td>${esc(c.nombre_completo)}${c.tipo_participante === 'menor' ? ' (menor)' : ''}</td><td>${c.edad}</td><td>${esc(c.capitulo || '—')}</td><td>${esc(c.zona || '—')}</td><td>${esc(procedenciaDe(c))}</td></tr>`;
-      }).join('')
-    ).join('');
-    const w = window.open('', '_blank');
-    if (!w) {
-      setError('El navegador bloqueó la ventana de impresión. Permite las ventanas emergentes para este sitio e inténtalo de nuevo.');
-      return;
+  // PDF de cumpleañeros — mismo diseño que el PDF de Diplomas (lo genera el
+  // servidor). 'imprimir' lo abre en una pestaña nueva para imprimir desde
+  // el visor del navegador; 'descargar' lo guarda como archivo.
+  async function pdfCumpleaneros(modo) {
+    if (!eventoActual) return;
+    // La pestaña se abre ANTES de la llamada async, o el navegador la bloquea como pop-up.
+    const ventana = modo === 'imprimir' ? window.open('', '_blank') : null;
+    setDescargandoCumple(modo);
+    setError('');
+    try {
+      const { data } = await api.get(`/admin/eventos/${eventoActual.id}/cumpleaneros/pdf`, {
+        responseType: 'blob',
+        params: mayusculasCumple ? { mayusculas: 1 } : undefined,
+      });
+      const url = window.URL.createObjectURL(new Blob([data], { type: 'application/pdf' }));
+      if (modo === 'imprimir') {
+        if (ventana) ventana.location.href = url; else window.location.href = url;
+      } else {
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `cumpleaneros_${eventoActual.nombre.replace(/\s+/g, '_')}.pdf`;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        window.URL.revokeObjectURL(url);
+      }
+    } catch (err) {
+      setError('No se pudo generar el PDF de cumpleañeros.');
+      if (ventana) ventana.close();
+    } finally {
+      setDescargandoCumple('');
     }
-    w.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>Cumpleañeros - ${esc(eventoActual.nombre)}</title>
-<style>
-  body{font-family:Arial,Helvetica,sans-serif;margin:24px;color:#111}
-  h1{font-size:20px;margin:0}
-  p{margin:4px 0 14px;color:#444;font-size:13px}
-  table{border-collapse:collapse;width:100%;font-size:13px}
-  th,td{border:1px solid #999;padding:6px 8px;text-align:left}
-  th{background:#e5e7eb}
-  tr.dia td{background:#fdf2c4;font-weight:bold}
-</style></head><body>
-<h1>🎂 Cumpleañeros — ${esc(eventoActual.nombre)}</h1>
-<p>Del ${esc(fechaDMA(eventoActual.fecha_inicio))} al ${esc(fechaDMA(eventoActual.fecha_fin))} · Total: ${cumpleaneros.length}</p>
-<table><thead><tr><th>#</th><th>Nombre</th><th>Cumple</th><th>Capítulo</th><th>Zona</th><th>Procedencia</th></tr></thead><tbody>${filas}</tbody></table>
-</body></html>`);
-    w.document.close();
-    w.focus();
-    setTimeout(() => w.print(), 300);
   }
 
   const municipiosEditar = formEditar ? (MUNICIPIOS_POR_DEPARTAMENTO[formEditar.departamento] || []) : [];
@@ -696,20 +697,22 @@ export default function AdminParticipantes() {
                 <button onClick={() => setModoLista('actual')} className={claseTab(modoLista === 'actual')}>
                   ★ Inscribiéndose ahora
                 </button>
-                <button onClick={() => setModoLista('cumple')} className={claseTab(modoLista === 'cumple')}>
-                  🎂 Cumpleañeros ({cumpleaneros.length})
-                </button>
                 <button onClick={() => setModoLista('todos')} className={claseTab(modoLista === 'todos')}>
                   Todos los participantes
                 </button>
               </div>
-              <button
-                onClick={refrescarListaActual}
-                title="Refrescar (también se actualiza solo cada 30 segundos)"
-                className="rounded-full border border-ink/20 px-4 py-2 text-sm font-semibold text-ink/70 hover:bg-ink/5"
-              >
-                ↻ Refrescar
-              </button>
+              <div className="flex flex-wrap gap-2">
+                <button onClick={() => setModoLista('cumple')} className={claseTab(modoLista === 'cumple')}>
+                  🎂 Cumpleañeros ({cumpleaneros.length})
+                </button>
+                <button
+                  onClick={refrescarListaActual}
+                  title="Refrescar (también se actualiza solo cada 30 segundos)"
+                  className="rounded-full border border-ink/20 px-4 py-2 text-sm font-semibold text-ink/70 hover:bg-ink/5"
+                >
+                  ↻ Refrescar
+                </button>
+              </div>
             </div>
 
             {modoLista === 'actual' && (
@@ -736,38 +739,6 @@ export default function AdminParticipantes() {
                         </button>
                       </div>
                     </div>
-
-                    {cumpleaneros.length > 0 && (
-                      <div className="mt-4 rounded-2xl border-2 border-gold bg-gold/15 px-5 py-4">
-                        <div className="flex flex-wrap items-center justify-between gap-2">
-                          <p className="font-display text-lg font-bold text-night">
-                            🎂 ¡Cumpleañeros del evento! ({cumpleaneros.length}) — ¡a cantarles las mañanitas!
-                          </p>
-                          <button onClick={() => setModoLista('cumple')} className="rounded-full border border-night/30 px-3 py-1 text-xs font-semibold text-night hover:bg-night/5">
-                            Ver tabla / imprimir
-                          </button>
-                        </div>
-                        <div className="mt-2 space-y-2">
-                          {gruposCumple.map((g) => (
-                            <div key={g.clave}>
-                              <p className="text-xs font-bold uppercase tracking-wide text-night/70">
-                                {textoDia(g.dia)}
-                                {g.clave === hoyHN && <span className="ml-2 rounded-full bg-ember px-2 py-0.5 text-[10px] font-bold text-white">HOY</span>}
-                              </p>
-                              <p className="mt-0.5 flex flex-wrap gap-x-4 gap-y-1 text-sm text-ink">
-                                {g.items.map((c) => (
-                                  <span key={c.inscripcion_id} className="whitespace-nowrap">
-                                    <span className="font-semibold">{c.nombre_completo}</span>
-                                    <span className="text-ink/60"> ({c.edad})</span>
-                                    {llegoDe(c) && <span title="Ya llegó" className="ml-1 text-[#007334]">✓</span>}
-                                  </span>
-                                ))}
-                              </p>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    )}
 
                     <form onSubmit={buscarEnEventoActual} className="mt-4 flex flex-wrap gap-3 rounded-2xl border border-ink/10 bg-white p-4 shadow-sm">
                       <input
@@ -877,13 +848,26 @@ export default function AdminParticipantes() {
                           Quienes cumplen años del {fechaDMA(eventoActual.fecha_inicio)} al {fechaDMA(eventoActual.fecha_fin)}, ordenados por día.
                         </p>
                       </div>
-                      <button
-                        onClick={imprimirCumpleaneros}
-                        disabled={cumpleaneros.length === 0}
-                        className="rounded-full bg-[#007334] px-5 py-2 text-sm font-semibold text-white hover:bg-[#005c29] disabled:cursor-not-allowed disabled:opacity-40"
-                      >
-                        Imprimir lista
-                      </button>
+                      <div className="flex flex-wrap items-center gap-3">
+                        <label className="flex cursor-pointer items-center gap-1.5 text-xs font-semibold text-ink/70">
+                          <input type="checkbox" checked={mayusculasCumple} onChange={(e) => setMayusculasCumple(e.target.checked)} />
+                          Todo en mayúsculas
+                        </label>
+                        <button
+                          onClick={() => pdfCumpleaneros('descargar')}
+                          disabled={cumpleaneros.length === 0 || descargandoCumple !== ''}
+                          className="rounded-full border border-ink/20 bg-white px-4 py-2 text-sm font-semibold text-ink/70 hover:bg-ink/5 disabled:cursor-not-allowed disabled:opacity-40"
+                        >
+                          {descargandoCumple === 'descargar' ? 'Generando…' : 'Descargar PDF'}
+                        </button>
+                        <button
+                          onClick={() => pdfCumpleaneros('imprimir')}
+                          disabled={cumpleaneros.length === 0 || descargandoCumple !== ''}
+                          className="rounded-full bg-[#007334] px-5 py-2 text-sm font-semibold text-white hover:bg-[#005c29] disabled:cursor-not-allowed disabled:opacity-40"
+                        >
+                          {descargandoCumple === 'imprimir' ? 'Preparando…' : 'Imprimir lista'}
+                        </button>
+                      </div>
                     </div>
 
                     {cargandoActual ? <p className="mt-6 text-ink/40">Cargando…</p> : (
