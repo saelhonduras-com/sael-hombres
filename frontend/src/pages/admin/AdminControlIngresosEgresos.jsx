@@ -13,6 +13,7 @@ export default function AdminControlIngresosEgresos() {
   const [cargando, setCargando] = useState(true);
   const [error, setError] = useState('');
   const [exportando, setExportando] = useState(null); // 'excel' | 'pdf' | null
+  const [mayusculas, setMayusculas] = useState(false); // opción para PDF/Imprimir/Excel; por defecto apagada
 
   useEffect(() => {
     api.get('/eventos')
@@ -58,6 +59,7 @@ export default function AdminControlIngresosEgresos() {
     try {
       const { data } = await api.get(`/admin/eventos/${eventoActual.id}/control-financiero/${formato}`, {
         responseType: 'blob',
+        params: mayusculas ? { mayusculas: 1 } : undefined,
       });
       const extension = formato === 'excel' ? 'xlsx' : 'pdf';
       const nombreArchivo = `control-ingresos-egresos-${eventoActual.nombre.replace(/\s+/g, '-')}.${extension}`;
@@ -88,7 +90,10 @@ export default function AdminControlIngresosEgresos() {
     setExportando('imprimir');
     setError('');
     try {
-      const { data } = await api.get(`/admin/eventos/${eventoActual.id}/control-financiero/pdf`, { responseType: 'blob' });
+      const { data } = await api.get(`/admin/eventos/${eventoActual.id}/control-financiero/pdf`, {
+        responseType: 'blob',
+        params: mayusculas ? { mayusculas: 1 } : undefined,
+      });
       const url = window.URL.createObjectURL(new Blob([data], { type: 'application/pdf' }));
       if (ventana) {
         ventana.location.href = url;
@@ -152,8 +157,17 @@ export default function AdminControlIngresosEgresos() {
             Egresos
           </button>
         </div>
-        <div className="flex gap-2">
-          <button
+        <div className="flex items-center gap-2">
+          <label className="flex cursor-pointer items-center gap-1.5 text-xs font-semibold text-ink/70">
+            <input
+              type="checkbox"
+              checked={mayusculas}
+              onChange={(e) => setMayusculas(e.target.checked)}
+              className="h-4 w-4 accent-[#007334]"
+            />
+            Todo en mayúsculas
+          </label>
+            <button
             onClick={() => exportar('excel')}
             disabled={exportando !== null || !datosIngresos}
             className="rounded-full border border-ink/20 px-4 py-1.5 text-xs font-semibold text-ink/70 hover:bg-ink/5 disabled:cursor-not-allowed disabled:opacity-40"

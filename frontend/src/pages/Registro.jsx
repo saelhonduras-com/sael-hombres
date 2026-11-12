@@ -5,6 +5,7 @@ import {
   DEPARTAMENTOS_HONDURAS, MUNICIPIOS_POR_DEPARTAMENTO,
   ZONAS_FIHNEC, ZONAS_POR_DEPARTAMENTO, CARGOS_FIHNEC, ESTADOS_CIVILES,
 } from '../listas';
+import SelectorFecha from '../components/SelectorFecha';
 
 const TOTAL_PASOS = 6;
 const NOMBRES_PASOS = ['DNI', 'Datos personales', 'Ubicación', 'Datos FIHNEC', 'Contacto de emergencia', 'Revisión'];
@@ -165,7 +166,6 @@ function plazoVencido(evento) {
 
 export default function Registro() {
   const navigate = useNavigate();
-  const hoy = new Date().toISOString().slice(0, 10);
   const [eventos, setEventos] = useState(null);
   const [paso, setPaso] = useState(1);
   const [form, setForm] = useState(vacio);
@@ -313,7 +313,7 @@ export default function Registro() {
   function validarEdicion() {
     if (!formEdicion.nombre_completo || !formEdicion.fecha_nacimiento || !formEdicion.estado_civil) return false;
     if (!/^\d{8}$/.test(formEdicion.telefono_movil)) return false;
-    if (!formEdicion.departamento || !formEdicion.municipio || !formEdicion.zona || !formEdicion.cargo_fihnec) return false;
+    if (!formEdicion.departamento || !formEdicion.municipio || !formEdicion.capitulo.trim() || !formEdicion.zona || !formEdicion.cargo_fihnec) return false;
     if (!formEdicion.contacto_emergencia_nombre || !/^\d{8}$/.test(formEdicion.contacto_emergencia_telefono)) return false;
     return true;
   }
@@ -350,7 +350,7 @@ export default function Registro() {
     return true;
   }
   function validarPaso3() {
-    return form.departamento && form.municipio && form.zona;
+    return form.departamento && form.municipio && form.capitulo.trim() && form.zona;
   }
   function validarPaso4() {
     if (!form.cargo_fihnec || form.ha_recibido_saeles === null) return false;
@@ -543,9 +543,9 @@ export default function Registro() {
               <Campo etiqueta="Nombre completo">
                 <input type="text" value={formEdicion.nombre_completo} onChange={(e) => setFormEdicion((f) => ({ ...f, nombre_completo: e.target.value }))} className={claseInput} />
               </Campo>
-              <Campo etiqueta="Fecha de nacimiento">
-                <input type="date" min="1920-01-01" max={hoy} value={formEdicion.fecha_nacimiento} onChange={(e) => setFormEdicion((f) => ({ ...f, fecha_nacimiento: e.target.value }))} className={claseInput} />
-              </Campo>
+              <CampoGrupo etiqueta="Fecha de nacimiento">
+                <SelectorFecha value={formEdicion.fecha_nacimiento} onChange={(v) => setFormEdicion((f) => ({ ...f, fecha_nacimiento: v }))} className={claseInput} />
+              </CampoGrupo>
               <Campo etiqueta="Teléfono móvil (8 dígitos)">
                 <input
                   type="tel" inputMode="numeric" maxLength={8} value={formEdicion.telefono_movil}
@@ -716,9 +716,9 @@ export default function Registro() {
               <Campo etiqueta="Nombre completo">
                 <input type="text" value={form.nombre_completo} onChange={(e) => actualizar('nombre_completo', e.target.value)} className={claseInput} />
               </Campo>
-              <Campo etiqueta="Fecha de nacimiento">
-                <input type="date" min="1920-01-01" max={hoy} value={form.fecha_nacimiento} onChange={(e) => actualizar('fecha_nacimiento', e.target.value)} className={claseInput} />
-              </Campo>
+              <CampoGrupo etiqueta="Fecha de nacimiento">
+                <SelectorFecha value={form.fecha_nacimiento} onChange={(v) => actualizar('fecha_nacimiento', v)} className={claseInput} />
+              </CampoGrupo>
               <Campo etiqueta="Teléfono móvil (8 dígitos)">
                 <input
                   type="tel" inputMode="numeric" maxLength={8} value={form.telefono_movil}
@@ -848,7 +848,7 @@ export default function Registro() {
                 {[
                   [form.es_extranjero ? 'Pasaporte' : 'DNI', form.dni],
                   ['Nombre', form.nombre_completo],
-                  ['Fecha de nacimiento', form.fecha_nacimiento],
+                  ['Fecha de nacimiento', form.fecha_nacimiento ? form.fecha_nacimiento.split('-').reverse().join('/') : '—'],
                   ['Teléfono', form.telefono_movil],
                   ['Estado civil', form.estado_civil],
                   ['Departamento / Municipio', `${form.departamento} / ${form.municipio}`],

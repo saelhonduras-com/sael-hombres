@@ -7,6 +7,7 @@ export default function AdminDiplomas() {
   const [cargando, setCargando] = useState(true);
   const [error, setError] = useState('');
   const [descargando, setDescargando] = useState('');
+  const [mayusculas, setMayusculas] = useState(false); // opción para PDF/Imprimir/Excel; por defecto apagada
   const [pagina, setPagina] = useState(1);
   const POR_PAGINA = 10;
 
@@ -68,7 +69,10 @@ export default function AdminDiplomas() {
     setDescargando(tipo);
     setError('');
     try {
-      const { data } = await api.get(`/admin/eventos/${eventoActual.id}/diplomas/${tipo}`, { responseType: 'blob' });
+      const { data } = await api.get(`/admin/eventos/${eventoActual.id}/diplomas/${tipo}`, {
+        responseType: 'blob',
+        params: mayusculas ? { mayusculas: 1 } : undefined,
+      });
       const url = window.URL.createObjectURL(new Blob([data]));
       const a = document.createElement('a');
       a.href = url;
@@ -96,7 +100,10 @@ export default function AdminDiplomas() {
     setDescargando('imprimir');
     setError('');
     try {
-      const { data } = await api.get(`/admin/eventos/${eventoActual.id}/diplomas/pdf`, { responseType: 'blob' });
+      const { data } = await api.get(`/admin/eventos/${eventoActual.id}/diplomas/pdf`, {
+        responseType: 'blob',
+        params: mayusculas ? { mayusculas: 1 } : undefined,
+      });
       const url = window.URL.createObjectURL(new Blob([data], { type: 'application/pdf' }));
       if (ventana) {
         ventana.location.href = url;
@@ -121,7 +128,16 @@ export default function AdminDiplomas() {
           </p>
         </div>
         {eventoActual && (
-          <div className="flex shrink-0 gap-2 print:hidden">
+          <div className="flex shrink-0 items-center gap-2 print:hidden">
+            <label className="flex cursor-pointer items-center gap-1.5 text-xs font-semibold text-ink/70">
+              <input
+                type="checkbox"
+                checked={mayusculas}
+                onChange={(e) => setMayusculas(e.target.checked)}
+                className="h-4 w-4 accent-[#007334]"
+              />
+              Todo en mayúsculas
+            </label>
             <button
               onClick={() => descargar('excel')}
               disabled={!!descargando || !datos || datos.total === 0}

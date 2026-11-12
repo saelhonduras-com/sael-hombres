@@ -4,6 +4,7 @@ const pool = require('../db');
 const { requireAuth, requireModulo } = require('../middleware/auth');
 const xlsx = require('xlsx');
 const PDFDocument = require('pdfkit');
+const { pedidoEnMayusculas, aplicarMayusculas, mayusculasEnHoja } = require('../pdfMayusculas');
 const path = require('path');
 
 // Todas las rutas de este módulo son de admin — Saelistas no tiene login
@@ -87,6 +88,7 @@ router.get('/admin/saelistas/excel', requireAuth, requireModulo('saelistas', 'co
     datos.push({ NOMBRE: 'Total Saelistas', DNI: rows.length });
 
     const hoja = xlsx.utils.json_to_sheet(datos);
+    if (pedidoEnMayusculas(req)) mayusculasEnHoja(hoja);
     const libro = xlsx.utils.book_new();
     xlsx.utils.book_append_sheet(libro, hoja, 'Saelistas');
     const buffer = xlsx.write(libro, { type: 'buffer', bookType: 'xlsx' });
@@ -113,6 +115,7 @@ router.get('/admin/saelistas/pdf', requireAuth, requireModulo('saelistas', 'cons
     );
 
     const doc = new PDFDocument({ size: 'letter', margin: 0, layout: 'portrait' });
+    if (pedidoEnMayusculas(req)) aplicarMayusculas(doc);
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', 'attachment; filename="saelistas.pdf"');
     doc.pipe(res);

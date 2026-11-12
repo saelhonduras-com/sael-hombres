@@ -4,6 +4,7 @@ const pool = require('../db');
 const { requireAuth, requireModulo } = require('../middleware/auth');
 const xlsx = require('xlsx');
 const PDFDocument = require('pdfkit');
+const { pedidoEnMayusculas, aplicarMayusculas, mayusculasEnHoja } = require('../pdfMayusculas');
 
 function validarDni(dni) {
   return /^\d{13}$/.test(dni);
@@ -35,8 +36,9 @@ function validarFechaNacimiento(fecha) {
   if (!fecha) return false;
   const d = new Date(fecha);
   if (Number.isNaN(d.getTime())) return false;
-  const minimo = new Date('1900-01-01');
   const hoy = new Date();
+  // Hasta 100 años hacia atrás (mismo rango que ofrece el selector del formulario).
+  const minimo = new Date(`${hoy.getFullYear() - 100}-01-01`);
   return d >= minimo && d <= hoy;
 }
 
@@ -111,7 +113,7 @@ router.put('/participantes/:id', async (req, res) => {
   if (!numero_identificacion) {
     return res.status(400).json({ error: 'Falta el número de identificación.' });
   }
-  if (!nombre_completo || !fecha_nacimiento || !telefono_movil || !departamento || !municipio || !zona || !cargo_fihnec || !estado_civil) {
+  if (!nombre_completo || !fecha_nacimiento || !telefono_movil || !departamento || !municipio || !capitulo || !String(capitulo).trim() || !zona || !cargo_fihnec || !estado_civil) {
     return res.status(400).json({ error: 'Faltan campos obligatorios.' });
   }
   if (!validarFechaNacimiento(fecha_nacimiento)) {
@@ -182,7 +184,7 @@ router.post('/participantes', async (req, res) => {
   } else if (!validarDni(numero_identificacion)) {
     return res.status(400).json({ error: 'El DNI debe tener 13 dígitos.' });
   }
-  if (!nombre_completo || !fecha_nacimiento || !telefono_movil || !departamento || !municipio || !zona || !cargo_fihnec || !estado_civil) {
+  if (!nombre_completo || !fecha_nacimiento || !telefono_movil || !departamento || !municipio || !capitulo || !String(capitulo).trim() || !zona || !cargo_fihnec || !estado_civil) {
     return res.status(400).json({ error: 'Faltan campos obligatorios.' });
   }
   if (!validarFechaNacimiento(fecha_nacimiento)) {
@@ -420,7 +422,7 @@ router.get('/admin/participantes/estadisticas', requireAuth, requireModulo('part
     const saelistasAsistencia = evento_id
       ? await pool.query(`SELECT COUNT(*) FROM saelista_asistencias WHERE evento_id = $1 AND registrado_presencial = true`, [evento_id])
       : await pool.query(`SELECT COUNT(*) FROM saelista_asistencias WHERE registrado_presencial = true`);
-    const estadisticas = { total: 0, nacional: 0, extranjero: 0 };
+    const estadisticas = { total: 0, nacional: 0, extranjero: 0, menor: 0 };
     confirmados.rows.forEach((r) => {
       const cantidad = parseInt(r.total, 10);
       estadisticas[r.tipo_participante] = cantidad;
@@ -529,7 +531,8 @@ router.get('/admin/eventos/:evento_id/inscripciones', requireAuth, requireModulo
       `SELECT i.id AS inscripcion_id, i.registrado_presencial,
               p.id AS participante_id, p.nombre_completo, p.numero_identificacion,
               p.tipo_identificacion, p.tipo_participante, p.capitulo, p.zona,
-              p.departamento, p.municipio
+              p.departamento, p.municipio,
+              to_char(p.fecha_nacimiento, 'YYYY-MM-DD') AS fecha_nacimiento
        FROM inscripciones i
        JOIN participantes p ON p.id = i.participante_id
        WHERE ${condiciones.join(' AND ')}
@@ -782,6 +785,136 @@ router.post('/admin/participantes/extranjero', requireAuth, requireModulo('parti
   }
 });
 
+// Admin: agrega un MENOR de edad manualmente y lo inscribe de una vez al evento
+// indicado. Los menores no tienen DNI, así que el sistema les asigna un código
+// interno propio (MEN-00001…). El código lleva guion a propósito: así NO pasa
+// la validación de DNI ni de pasaporte, y nadie puede consultar los datos de
+// un menor desde el formulario público. El responsable se guarda como contacto
+// de emergencia (obligatorio). Si ya existe alguien con el mismo nombre y fecha
+// de nacimiento, no se crea otro: se avisa para inscribir al existente y así
+// no duplicar registros en cada evento.
+router.post('/admin/participantes/menor', requireAuth, requireModulo('participantes', 'edicion'), async (req, res) => {
+  const {
+    nombre_completo, fecha_nacimiento,
+    departamento, municipio, capitulo, zona,
+    contacto_emergencia_nombre, contacto_emergencia_telefono,
+    evento_id,
+  } = req.body;
+
+  if (!nombre_completo || !nombre_completo.trim()) {
+    return res.status(400).json({ error: 'El nombre completo es obligatorio.' });
+  }
+  if (!fecha_nacimiento || !validarFechaNacimiento(fecha_nacimiento)) {
+    return res.status(400).json({ error: 'La fecha de nacimiento es obligatoria y debe ser válida.' });
+  }
+  if (!contacto_emergencia_nombre || !contacto_emergencia_nombre.trim()) {
+    return res.status(400).json({ error: 'El nombre del responsable es obligatorio.' });
+  }
+  if (!contacto_emergencia_telefono || !validarTelefono(contacto_emergencia_telefono)) {
+    return res.status(400).json({ error: 'El teléfono del responsable debe tener exactamente 8 dígitos.' });
+  }
+  if (!evento_id) {
+    return res.status(400).json({ error: 'Debes seleccionar el evento SAEL al que se inscribe.' });
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    const evento = await client.query(`SELECT abierto FROM eventos WHERE id = $1`, [evento_id]);
+    if (evento.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'El evento no existe.' });
+    }
+    if (!evento.rows[0].abierto) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ error: 'El registro para este evento está cerrado.' });
+    }
+
+    const nombreLimpio = nombre_completo.trim().replace(/\s+/g, ' ');
+    const duplicado = await client.query(
+      `SELECT id, nombre_completo, numero_identificacion
+       FROM participantes
+       WHERE oculto = false
+         AND fecha_nacimiento = $2
+         AND lower(regexp_replace(trim(nombre_completo), '\\s+', ' ', 'g')) = lower($1)
+       LIMIT 1`,
+      [nombreLimpio, fecha_nacimiento]
+    );
+    if (duplicado.rows.length > 0) {
+      await client.query('ROLLBACK');
+      return res.status(409).json({
+        duplicado: true,
+        participante: duplicado.rows[0],
+        error: `Ya existe un participante con ese nombre y fecha de nacimiento (${duplicado.rows[0].numero_identificacion}). No se creó otro registro.`,
+      });
+    }
+
+    const { rows: seq } = await client.query(`SELECT nextval('menores_codigo_seq') AS n`);
+    const codigo = `MEN-${String(seq[0].n).padStart(5, '0')}`;
+
+    const participante = await client.query(
+      `INSERT INTO participantes (
+        numero_identificacion, tipo_identificacion, tipo_participante,
+        nombre_completo, fecha_nacimiento,
+        departamento, municipio, capitulo, zona,
+        contacto_emergencia_nombre, contacto_emergencia_telefono
+      ) VALUES ($1,'Código interno','menor',$2,$3,$4,$5,$6,$7,$8,$9)
+      RETURNING id, nombre_completo, numero_identificacion`,
+      [
+        codigo, nombreLimpio, fecha_nacimiento,
+        departamento || null, municipio || null, capitulo || null, zona || null,
+        contacto_emergencia_nombre.trim(), contacto_emergencia_telefono,
+      ]
+    );
+
+    await client.query(
+      `INSERT INTO inscripciones (participante_id, evento_id) VALUES ($1, $2)`,
+      [participante.rows[0].id, evento_id]
+    );
+
+    await client.query('COMMIT');
+    res.status(201).json(participante.rows[0]);
+  } catch (err) {
+    await client.query('ROLLBACK');
+    res.status(500).json({ error: 'No se pudo completar el registro del menor.' });
+  } finally {
+    client.release();
+  }
+});
+
+// Admin: inscribe a un participante YA existente (de cualquier tipo) a un
+// evento abierto, sin que tenga que pasar por el formulario público. Es lo que
+// permite que un menor (sin DNI) se registre una sola vez y en los siguientes
+// eventos solo se le busque y se le inscriba.
+router.post('/admin/participantes/:id/inscribir', requireAuth, requireModulo('participantes', 'edicion'), async (req, res) => {
+  const { id } = req.params;
+  const { evento_id } = req.body;
+  if (!evento_id) {
+    return res.status(400).json({ error: 'Falta el evento.' });
+  }
+  try {
+    const evento = await pool.query(`SELECT abierto FROM eventos WHERE id = $1`, [evento_id]);
+    if (evento.rows.length === 0) {
+      return res.status(404).json({ error: 'El evento no existe.' });
+    }
+    if (!evento.rows[0].abierto) {
+      return res.status(400).json({ error: 'El registro para este evento está cerrado.' });
+    }
+    const participante = await pool.query(`SELECT id FROM participantes WHERE id = $1 AND oculto = false`, [id]);
+    if (participante.rows.length === 0) {
+      return res.status(404).json({ error: 'Participante no encontrado.' });
+    }
+    await pool.query(`INSERT INTO inscripciones (participante_id, evento_id) VALUES ($1, $2)`, [id, evento_id]);
+    res.status(201).json({ ok: true });
+  } catch (err) {
+    if (err.code === '23505') {
+      return res.status(409).json({ error: 'Este participante ya está inscrito a ese evento.' });
+    }
+    res.status(500).json({ error: 'No se pudo inscribir al participante.' });
+  }
+});
+
 // Admin: marca (o desmarca) el chequeo presencial de una inscripción específica.
 // Igual que en SFL: nunca se borra la inscripción por inasistencia, solo queda
 // con registrado_presencial = false para siempre y así se excluye de conteos.
@@ -955,6 +1088,7 @@ router.get('/admin/eventos/:evento_id/diplomas/excel', requireAuth, requireModul
     datos.push({ CAPÍTULO: 'Total TC / TD', NOMBRE: totalesPago.tarjeta });
 
     const hoja = xlsx.utils.json_to_sheet(datos);
+    if (pedidoEnMayusculas(req)) mayusculasEnHoja(hoja);
     const libro = xlsx.utils.book_new();
     xlsx.utils.book_append_sheet(libro, hoja, 'Diplomas');
     const buffer = xlsx.write(libro, { type: 'buffer', bookType: 'xlsx' });
@@ -979,6 +1113,7 @@ router.get('/admin/eventos/:evento_id/diplomas/pdf', requireAuth, requireModulo(
 
     // Vertical (portrait), a pedido de Carlos.
     const doc = new PDFDocument({ size: 'letter', margin: 0, layout: 'portrait' });
+    if (pedidoEnMayusculas(req)) aplicarMayusculas(doc);
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', `attachment; filename="diplomas_${evento.rows[0].nombre.replace(/\s+/g, '_')}.pdf"`);
     doc.pipe(res);

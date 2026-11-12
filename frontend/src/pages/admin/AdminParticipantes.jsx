@@ -8,11 +8,13 @@ import {
   CARGOS_FIHNEC,
   ESTADOS_CIVILES,
 } from '../../listas';
+import SelectorFecha from '../../components/SelectorFecha';
 
 const TIPOS_PARTICIPANTE = [
   { value: '', label: 'Nacionalidad' },
   { value: 'nacional', label: 'Nacional' },
   { value: 'extranjero', label: 'Extranjero' },
+  { value: 'menor', label: 'Menor' },
 ];
 
 const LIMITE = 30;
@@ -26,6 +28,20 @@ const vacioExtranjero = {
   contacto_emergencia_nombre: '', contacto_emergencia_telefono: '',
   evento_id: '',
 };
+
+const vacioMenor = {
+  nombre_completo: '', fecha_nacimiento: '',
+  contacto_emergencia_nombre: '', contacto_emergencia_telefono: '',
+  departamento: '', municipio: '', capitulo: '', zona: '',
+  evento_id: '',
+};
+
+// "1985-03-15" → "15/03/1985"
+function fechaDMA(fechaISO) {
+  if (!fechaISO) return '—';
+  const [a, m, d] = fechaISO.slice(0, 10).split('-');
+  return `${d}/${m}/${a}`;
+}
 
 const claseInput = 'w-full rounded-lg border border-ink/15 px-3 py-2 text-sm focus:border-ember focus:outline-none';
 const claseFiltro = 'w-48 rounded-lg border border-ink/15 px-3 py-1.5 text-xs focus:border-ember focus:outline-none';
@@ -76,10 +92,14 @@ export default function AdminParticipantes() {
   useEffect(() => { buscarActualRef.current = buscarActual; }, [buscarActual]);
 
   // --- Detalle / edición / extranjero (sin cambios de comportamiento) ---
-  const [vista, setVista] = useState('lista'); // 'lista' | 'detalle' | 'editar' | 'extranjero'
+  const [vista, setVista] = useState('lista'); // 'lista' | 'detalle' | 'editar' | 'extranjero' | 'menor'
   const [seleccionado, setSeleccionado] = useState(null);
   const [formEditar, setFormEditar] = useState(null);
   const [formExtranjero, setFormExtranjero] = useState(vacioExtranjero);
+  const [formMenor, setFormMenor] = useState(vacioMenor);
+  // Lista completa (sin filtro de búsqueda) de inscritos al evento actual —
+  // de aquí salen los cumpleañeros, para que no cambien al buscar a alguien.
+  const [baseCumple, setBaseCumple] = useState([]);
   const [eventosAbiertos, setEventosAbiertos] = useState([]);
   const [guardando, setGuardando] = useState(false);
 
@@ -180,6 +200,7 @@ export default function AdminParticipantes() {
       if (texto) params.buscar = texto;
       const { data } = await api.get(`/admin/eventos/${eventoActual.id}/inscripciones`, { params });
       setInscripcionesActual(data.inscripciones);
+      if (!texto) setBaseCumple(data.inscripciones);
       setTotalActual(data.total);
       setRegistradosActual(data.total_registrados);
     } catch (err) {
@@ -492,17 +513,110 @@ export default function AdminParticipantes() {
     }
   }
 
+  function recargarTodoTrasInscribir() {
+    cargarParticipantes(filtrosRef.current, 1, true);
+    if (modoLista === 'actual' && eventoActual) cargarInscripcionesEventoActual(buscarActual);
+    api.get('/admin/participantes/estadisticas', eventoActual ? { params: { evento_id: eventoActual.id } } : undefined).then(({ data }) => setEstadisticas(data)).catch(() => {});
+    refrescarResumen();
+  }
+
+  async function abrirMenor() {
+    setError('');
+    setFormMenor(vacioMenor);
+    try {
+      const { data } = await api.get('/eventos');
+      const abiertos = data.filter((ev) => ev.abierto);
+      setEventosAbiertos(abiertos);
+      if (abiertos.length === 1) setFormMenor((f) => ({ ...f, evento_id: String(abiertos[0].id) }));
+    } catch (err) {
+      setError(mensajeError(err));
+    }
+    setVista('menor');
+  }
+
+  async function guardarMenor() {
+    setGuardando(true);
+    setError('');
+    try {
+      await api.post('/admin/participantes/menor', formMenor);
+      setVista('lista');
+      recargarTodoTrasInscribir();
+    } catch (err) {
+      const datos = err?.response?.data;
+      if (err?.response?.status === 409 && datos?.duplicado) {
+        const ev = eventosAbiertos.find((e) => String(e.id) === String(formMenor.evento_id));
+        pedirConfirmacion({
+          mensaje: `${datos.error} ¿Quieres inscribir al que ya existe (${datos.participante.nombre_completo}) a ${ev ? ev.nombre : 'este evento'}?`,
+          textoConfirmar: 'Sí, inscribir al existente',
+          onConfirmar: async () => {
+            try {
+              await api.post(`/admin/participantes/${datos.participante.id}/inscribir`, { evento_id: formMenor.evento_id });
+              setVista('lista');
+              recargarTodoTrasInscribir();
+            } catch (e2) {
+              setError(mensajeError(e2));
+            }
+          },
+        });
+      } else {
+        setError(mensajeError(err));
+      }
+    } finally {
+      setGuardando(false);
+    }
+  }
+
+  async function inscribirAlEventoActual(participanteId) {
+    setError('');
+    try {
+      await api.post(`/admin/participantes/${participanteId}/inscribir`, { evento_id: eventoActual.id });
+      await recargarDetalle(participanteId);
+      recargarTodoTrasInscribir();
+    } catch (err) {
+      setError(mensajeError(err));
+    }
+  }
+
+  // --- Cumpleañeros del evento actual: quien cumple años entre el primer y
+  // el último día del evento (así se les pueden cantar las mañanitas ahí).
+  const cumpleaneros = (() => {
+    if (!eventoActual || baseCumple.length === 0) return [];
+    const [a1, m1, d1] = eventoActual.fecha_inicio.slice(0, 10).split('-').map(Number);
+    const [a2, m2, d2] = eventoActual.fecha_fin.slice(0, 10).split('-').map(Number);
+    const dias = [];
+    let actual = Date.UTC(a1, m1 - 1, d1);
+    const fin = Date.UTC(a2, m2 - 1, d2);
+    for (let n = 0; actual <= fin && n < 31; n += 1, actual += 86400000) dias.push(new Date(actual));
+    const lista = [];
+    baseCumple.forEach((i) => {
+      if (!i.fecha_nacimiento) return;
+      const [an, mn, dn] = i.fecha_nacimiento.split('-').map(Number);
+      const dia = dias.find((d) => d.getUTCMonth() + 1 === mn && d.getUTCDate() === dn);
+      if (dia) lista.push({ ...i, dia, edad: dia.getUTCFullYear() - an });
+    });
+    return lista.sort((x, y) => (x.dia - y.dia) || x.nombre_completo.localeCompare(y.nombre_completo));
+  })();
+  const idsCumpleaneros = new Set(cumpleaneros.map((c) => c.participante_id));
+  // Honduras es UTC-6 todo el año
+  const hoyHN = new Date(Date.now() - 6 * 60 * 60 * 1000).toISOString().slice(0, 10);
+
   const municipiosEditar = formEditar ? (MUNICIPIOS_POR_DEPARTAMENTO[formEditar.departamento] || []) : [];
   const municipiosExtranjero = MUNICIPIOS_POR_DEPARTAMENTO[formExtranjero.departamento] || [];
+  const municipiosMenor = MUNICIPIOS_POR_DEPARTAMENTO[formMenor.departamento] || [];
 
   return (
     <div>
       <div className="flex items-center justify-between">
         <h1 className="font-display text-2xl font-bold text-ink">Participantes</h1>
         {vista === 'lista' && (
-          <button onClick={abrirExtranjero} className="rounded-full bg-[#007334] px-5 py-2 text-sm font-semibold text-white hover:bg-[#005c29]">
-            + Agregar extranjero
-          </button>
+          <div className="flex flex-wrap gap-2">
+            <button onClick={abrirMenor} className="rounded-full bg-[#007334] px-5 py-2 text-sm font-semibold text-white hover:bg-[#005c29]">
+              + Agregar menor
+            </button>
+            <button onClick={abrirExtranjero} className="rounded-full bg-[#007334] px-5 py-2 text-sm font-semibold text-white hover:bg-[#005c29]">
+              + Agregar extranjero
+            </button>
+          </div>
         )}
       </div>
 
@@ -554,6 +668,31 @@ export default function AdminParticipantes() {
                       </div>
                     </div>
 
+                    {cumpleaneros.length > 0 && (
+                      <div className="mt-4 rounded-2xl border-2 border-gold bg-gold/15 px-5 py-4">
+                        <p className="font-display text-lg font-bold text-night">
+                          🎂 ¡Cumpleañeros del evento! — ¡a cantarles las mañanitas!
+                        </p>
+                        <ul className="mt-2 space-y-1.5">
+                          {cumpleaneros.map((c) => {
+                            const llego = inscripcionesActual.find((x) => x.inscripcion_id === c.inscripcion_id)?.registrado_presencial ?? c.registrado_presencial;
+                            const esHoy = c.dia.toISOString().slice(0, 10) === hoyHN;
+                            const diaTexto = c.dia.toLocaleDateString('es-HN', { weekday: 'long', day: 'numeric', month: 'long', timeZone: 'UTC' });
+                            return (
+                              <li key={c.inscripcion_id} className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-ink">
+                                <span className="font-semibold">{c.nombre_completo}</span>
+                                <span className="text-ink/70">cumple {c.edad} años el {diaTexto}</span>
+                                {esHoy && <span className="rounded-full bg-ember px-2 py-0.5 text-xs font-bold text-white">HOY</span>}
+                                <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${llego ? 'bg-[#007334]/15 text-[#007334]' : 'bg-ink/10 text-ink/50'}`}>
+                                  {llego ? 'Ya llegó' : 'Aún no registrado'}
+                                </span>
+                              </li>
+                            );
+                          })}
+                        </ul>
+                      </div>
+                    )}
+
                     <form onSubmit={buscarEnEventoActual} className="mt-4 flex flex-wrap gap-3 rounded-2xl border border-ink/10 bg-white p-4 shadow-sm">
                       <input
                         type="text"
@@ -602,6 +741,12 @@ export default function AdminParticipantes() {
                                   {i.nombre_completo}
                                   {i.tipo_participante === 'extranjero' && (
                                     <span className="ml-2 rounded-full bg-night/10 px-2 py-0.5 text-xs font-semibold text-night">Extranjero</span>
+                                  )}
+                                  {i.tipo_participante === 'menor' && (
+                                    <span className="ml-2 rounded-full bg-gold/30 px-2 py-0.5 text-xs font-semibold text-night">Menor</span>
+                                  )}
+                                  {idsCumpleaneros.has(i.participante_id) && (
+                                    <span title="Cumple años durante el evento" className="ml-2">🎂</span>
                                   )}
                                 </td>
                                 <td className="px-4 py-3 text-ink/60">{i.tipo_identificacion}: {i.numero_identificacion}</td>
@@ -699,6 +844,9 @@ export default function AdminParticipantes() {
                               {p.tipo_participante === 'extranjero' && (
                                 <span className="ml-2 rounded-full bg-night/10 px-2 py-0.5 text-xs font-semibold text-night">Extranjero</span>
                               )}
+                              {p.tipo_participante === 'menor' && (
+                                <span className="ml-2 rounded-full bg-gold/30 px-2 py-0.5 text-xs font-semibold text-night">Menor</span>
+                              )}
                             </td>
                             <td className="px-4 py-3 text-ink/60">{p.tipo_identificacion}: {p.numero_identificacion}</td>
                             <td className="px-4 py-3 text-ink/60 capitalize">{p.tipo_participante}</td>
@@ -753,7 +901,7 @@ export default function AdminParticipantes() {
           <dl className="mt-4 grid gap-3 text-sm sm:grid-cols-2">
             <div><dt className="text-ink/50">Identificación</dt><dd className="font-medium text-ink">{seleccionado.tipo_identificacion}: {seleccionado.numero_identificacion}</dd></div>
             <div><dt className="text-ink/50">Tipo</dt><dd className="font-medium text-ink capitalize">{seleccionado.tipo_participante}</dd></div>
-            <div><dt className="text-ink/50">Fecha de nacimiento</dt><dd className="font-medium text-ink">{seleccionado.fecha_nacimiento ? seleccionado.fecha_nacimiento.slice(0, 10) : '—'}</dd></div>
+            <div><dt className="text-ink/50">Fecha de nacimiento</dt><dd className="font-medium text-ink">{fechaDMA(seleccionado.fecha_nacimiento)}</dd></div>
             <div><dt className="text-ink/50">Teléfono</dt><dd className="font-medium text-ink">{seleccionado.telefono_movil || '—'}</dd></div>
             <div><dt className="text-ink/50">Departamento / Municipio</dt><dd className="font-medium text-ink">{seleccionado.departamento || '—'} / {seleccionado.municipio || '—'}</dd></div>
             <div><dt className="text-ink/50">Capítulo</dt><dd className="font-medium text-ink">{seleccionado.capitulo || '—'}</dd></div>
@@ -764,7 +912,14 @@ export default function AdminParticipantes() {
             <div><dt className="text-ink/50">Total de SAELES</dt><dd className="font-medium text-ink">{seleccionado.total_saeles} <span className="text-xs text-ink/40">(solo encuentros con presencia confirmada)</span></dd></div>
           </dl>
 
-          <h3 className="mt-6 font-display text-sm font-bold text-ink">Historial de inscripciones</h3>
+          <div className="mt-6 flex flex-wrap items-center justify-between gap-2">
+            <h3 className="font-display text-sm font-bold text-ink">Historial de inscripciones</h3>
+            {eventoActual?.abierto && !seleccionado.inscripciones.some((i) => Number(i.evento_id) === Number(eventoActual.id)) && (
+              <button onClick={() => inscribirAlEventoActual(seleccionado.id)} className={btnEditar}>
+                Inscribir a {eventoActual.nombre}
+              </button>
+            )}
+          </div>
           {seleccionado.inscripciones.length === 0 ? (
             <p className="mt-2 text-sm text-ink/40">Sin inscripciones registradas todavía.</p>
           ) : (
@@ -795,10 +950,10 @@ export default function AdminParticipantes() {
               <span className="mb-1 block text-xs font-semibold text-ink/60">Nombre completo</span>
               <input type="text" value={formEditar.nombre_completo} onChange={(e) => setFormEditar((f) => ({ ...f, nombre_completo: e.target.value }))} className={claseInput} />
             </label>
-            <label>
+            <div>
               <span className="mb-1 block text-xs font-semibold text-ink/60">Fecha de nacimiento</span>
-              <input type="date" value={formEditar.fecha_nacimiento} onChange={(e) => setFormEditar((f) => ({ ...f, fecha_nacimiento: e.target.value }))} className={claseInput} />
-            </label>
+              <SelectorFecha value={formEditar.fecha_nacimiento} onChange={(v) => setFormEditar((f) => ({ ...f, fecha_nacimiento: v }))} className={claseInput} />
+            </div>
             <label>
               <span className="mb-1 block text-xs font-semibold text-ink/60">Teléfono móvil</span>
               <input type="text" value={formEditar.telefono_movil} onChange={(e) => setFormEditar((f) => ({ ...f, telefono_movil: e.target.value.replace(/\D/g, '').slice(0, 8) }))} className={claseInput} />
@@ -902,10 +1057,10 @@ export default function AdminParticipantes() {
                 {eventosAbiertos.map((ev) => <option key={ev.id} value={ev.id}>{ev.nombre}</option>)}
               </select>
             </label>
-            <label>
+            <div>
               <span className="mb-1 block text-xs font-semibold text-ink/60">Fecha de nacimiento</span>
-              <input type="date" value={formExtranjero.fecha_nacimiento} onChange={(e) => setFormExtranjero((f) => ({ ...f, fecha_nacimiento: e.target.value }))} className={claseInput} />
-            </label>
+              <SelectorFecha value={formExtranjero.fecha_nacimiento} onChange={(v) => setFormExtranjero((f) => ({ ...f, fecha_nacimiento: v }))} className={claseInput} />
+            </div>
             <label>
               <span className="mb-1 block text-xs font-semibold text-ink/60">Teléfono móvil</span>
               <input type="text" value={formExtranjero.telefono_movil} onChange={(e) => setFormExtranjero((f) => ({ ...f, telefono_movil: e.target.value.replace(/\D/g, '').slice(0, 8) }))} className={claseInput} />
@@ -979,6 +1134,75 @@ export default function AdminParticipantes() {
           <div className="mt-6 flex justify-end gap-3">
             <button onClick={() => setVista('lista')} className="rounded-full border border-ink/20 px-5 py-2 text-sm font-semibold text-ink/70 hover:bg-ink/5">Cancelar</button>
             <button onClick={guardarExtranjero} disabled={guardando} className="rounded-full bg-ember px-5 py-2 text-sm font-semibold text-white hover:bg-ember-light disabled:opacity-50">
+              {guardando ? 'Guardando…' : 'Guardar e inscribir'}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {vista === 'menor' && (
+        <div className="mx-auto mt-4 max-w-2xl rounded-2xl border border-ink/10 bg-white p-6 shadow-sm">
+          <h2 className="font-display text-lg font-bold text-ink">Agregar menor de edad</h2>
+          <p className="mt-1 text-xs text-ink/50">
+            Los menores no tienen DNI: el sistema les asigna un código interno (MEN-00001…) y quedan inscritos de
+            una vez al evento. Se registran una sola vez; en los siguientes eventos se busca al menor en
+            "Todos los participantes" y se usa "Inscribir" en su detalle. Si ya existe alguien con el mismo nombre
+            y fecha de nacimiento, el sistema avisa y no crea otro.
+          </p>
+          {error && <p className="mt-3 rounded-lg bg-ember/10 p-3 text-sm text-ember">{error}</p>}
+          <div className="mt-4 grid gap-4 sm:grid-cols-2">
+            <label className="sm:col-span-2">
+              <span className="mb-1 block text-xs font-semibold text-ink/60">Nombre completo del menor *</span>
+              <input type="text" value={formMenor.nombre_completo} onChange={(e) => setFormMenor((f) => ({ ...f, nombre_completo: e.target.value }))} className={claseInput} />
+            </label>
+            <div>
+              <span className="mb-1 block text-xs font-semibold text-ink/60">Fecha de nacimiento *</span>
+              <SelectorFecha value={formMenor.fecha_nacimiento} onChange={(v) => setFormMenor((f) => ({ ...f, fecha_nacimiento: v }))} className={claseInput} />
+            </div>
+            <label>
+              <span className="mb-1 block text-xs font-semibold text-ink/60">Evento SAEL al que se inscribe *</span>
+              <select value={formMenor.evento_id} onChange={(e) => setFormMenor((f) => ({ ...f, evento_id: e.target.value }))} className={claseInput}>
+                <option value="">Seleccionar…</option>
+                {eventosAbiertos.map((ev) => <option key={ev.id} value={ev.id}>{ev.nombre}</option>)}
+              </select>
+            </label>
+            <label>
+              <span className="mb-1 block text-xs font-semibold text-ink/60">Responsable (padre, madre o tutor) — nombre *</span>
+              <input type="text" value={formMenor.contacto_emergencia_nombre} onChange={(e) => setFormMenor((f) => ({ ...f, contacto_emergencia_nombre: e.target.value }))} className={claseInput} />
+            </label>
+            <label>
+              <span className="mb-1 block text-xs font-semibold text-ink/60">Responsable — teléfono (8 dígitos) *</span>
+              <input type="text" inputMode="numeric" value={formMenor.contacto_emergencia_telefono} onChange={(e) => setFormMenor((f) => ({ ...f, contacto_emergencia_telefono: e.target.value.replace(/\D/g, '').slice(0, 8) }))} className={claseInput} />
+            </label>
+            <label>
+              <span className="mb-1 block text-xs font-semibold text-ink/60">Departamento</span>
+              <select value={formMenor.departamento} onChange={(e) => setFormMenor((f) => ({ ...f, departamento: e.target.value, municipio: '' }))} className={claseInput}>
+                <option value="">Seleccionar…</option>
+                {DEPARTAMENTOS_HONDURAS.map((d) => <option key={d} value={d}>{d}</option>)}
+              </select>
+            </label>
+            <label>
+              <span className="mb-1 block text-xs font-semibold text-ink/60">Municipio</span>
+              <select value={formMenor.municipio} onChange={(e) => setFormMenor((f) => ({ ...f, municipio: e.target.value }))} className={claseInput} disabled={!formMenor.departamento}>
+                <option value="">Seleccionar…</option>
+                {municipiosMenor.map((m) => <option key={m} value={m}>{m}</option>)}
+              </select>
+            </label>
+            <label>
+              <span className="mb-1 block text-xs font-semibold text-ink/60">Capítulo</span>
+              <input type="text" value={formMenor.capitulo} onChange={(e) => setFormMenor((f) => ({ ...f, capitulo: e.target.value }))} className={claseInput} />
+            </label>
+            <label>
+              <span className="mb-1 block text-xs font-semibold text-ink/60">Zona</span>
+              <select value={formMenor.zona} onChange={(e) => setFormMenor((f) => ({ ...f, zona: e.target.value }))} className={claseInput}>
+                <option value="">Seleccionar…</option>
+                {ZONAS_FIHNEC.map((z) => <option key={z} value={z}>{z}</option>)}
+              </select>
+            </label>
+          </div>
+          <div className="mt-6 flex justify-end gap-3">
+            <button onClick={() => setVista('lista')} className="rounded-full border border-ink/20 px-5 py-2 text-sm font-semibold text-ink/70 hover:bg-ink/5">Cancelar</button>
+            <button onClick={guardarMenor} disabled={guardando} className="rounded-full bg-ember px-5 py-2 text-sm font-semibold text-white hover:bg-ember-light disabled:opacity-50">
               {guardando ? 'Guardando…' : 'Guardar e inscribir'}
             </button>
           </div>

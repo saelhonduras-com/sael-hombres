@@ -67,6 +67,14 @@ function formatearHora12(horaHHMM) {
   return `${hora12}:${String(minuto).padStart(2, '0')} ${meridiano}`;
 }
 
+// "2026-11-27" → "27/11/2026" (día / mes / año). Trabaja con el texto
+// directo, sin crear Date, para que la zona horaria no corra el día.
+function formatearFecha(fechaISO) {
+  if (!fechaISO) return '';
+  const [anio, mes, dia] = fechaISO.slice(0, 10).split('-');
+  return `${dia}/${mes}/${anio}`;
+}
+
 function CajaTiempo({ valor, etiqueta }) {
   return (
     <div className="rounded-md bg-night px-2 py-0.5 text-center text-white">
@@ -260,7 +268,7 @@ export default function AdminEventos() {
               <input type="text" value={form.nombre} onChange={(e) => setForm((f) => ({ ...f, nombre: e.target.value }))} className={claseInput} placeholder="SAEL Septiembre 2026" />
             </label>
 
-            <p className="mb-1.5 mt-4 text-[11px] font-semibold uppercase tracking-wide text-ink/40">Fechas</p>
+            <p className="mb-1.5 mt-4 text-[11px] font-semibold uppercase tracking-wide text-ink/40">Fechas del evento</p>
             <div className="grid grid-cols-2 gap-x-3 gap-y-3">
               <label>
                 <span className="mb-1 block text-xs font-semibold text-ink/60">Mes</span>
@@ -273,13 +281,17 @@ export default function AdminEventos() {
                 <input type="number" value={form.anio} onChange={(e) => setForm((f) => ({ ...f, anio: Number(e.target.value) }))} className={claseInput} />
               </label>
               <label>
-                <span className="mb-1 block text-xs font-semibold text-ink/60">Fecha inicio</span>
+                <span className="mb-1 block text-xs font-semibold text-ink/60">Fecha inicio del evento</span>
                 <input type="date" value={form.fecha_inicio} onChange={(e) => setForm((f) => ({ ...f, fecha_inicio: e.target.value }))} className={claseInput} />
               </label>
               <label>
-                <span className="mb-1 block text-xs font-semibold text-ink/60">Fecha fin</span>
+                <span className="mb-1 block text-xs font-semibold text-ink/60">Fecha fin del evento</span>
                 <input type="date" value={form.fecha_fin} onChange={(e) => setForm((f) => ({ ...f, fecha_fin: e.target.value }))} className={claseInput} />
               </label>
+            </div>
+
+            <p className="mb-1.5 mt-5 text-[11px] font-semibold uppercase tracking-wide text-ink/40">Fechas de inscripciones</p>
+            <div className="grid grid-cols-2 gap-x-3 gap-y-3">
               <label className="col-span-2">
                 <span className="mb-1 block text-xs font-semibold text-ink/60">Fecha límite de registro</span>
                 <input type="date" value={form.fecha_limite_registro} onChange={(e) => setForm((f) => ({ ...f, fecha_limite_registro: e.target.value }))} className={claseInput} />
@@ -321,7 +333,6 @@ export default function AdminEventos() {
                 </div>
               </label>
             </div>
-
             <p className="mb-1.5 mt-4 text-[11px] font-semibold uppercase tracking-wide text-ink/40">Estado</p>
             <div className="flex flex-col gap-2 rounded-lg bg-ink/5 p-3">
               <label className="flex items-center gap-2">
@@ -374,7 +385,10 @@ export default function AdminEventos() {
                       </span>
                     </p>
                     <p className="mt-0.5 text-xs text-ink/50">
-                      {ev.fecha_inicio.slice(0, 10)} al {ev.fecha_fin.slice(0, 10)} · Límite: {ev.fecha_limite_registro.slice(0, 10)} {formatearHora12(ev.hora_limite_registro)}
+                      Evento: {formatearFecha(ev.fecha_inicio)} al {formatearFecha(ev.fecha_fin)}
+                    </p>
+                    <p className="text-xs text-ink/50">
+                      Inscripciones hasta el {formatearFecha(ev.fecha_limite_registro)} · {formatearHora12(ev.hora_limite_registro)}
                     </p>
                   </div>
 

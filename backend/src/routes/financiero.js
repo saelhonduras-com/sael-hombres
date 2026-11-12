@@ -4,6 +4,7 @@ const pool = require('../db');
 const { requireAuth, requireModulo, requireRole } = require('../middleware/auth');
 const XLSX = require('xlsx');
 const PDFDocument = require('pdfkit');
+const { pedidoEnMayusculas, aplicarMayusculas, mayusculasEnHoja } = require('../pdfMayusculas');
 
 // Este archivo es donde va a vivir todo lo financiero que sigue
 // construyéndose (Control de Ingresos, Control de Egresos, Resumen
@@ -673,6 +674,7 @@ router.get('/admin/eventos/:evento_id/control-financiero/excel', requireAuth, re
 
     const hoja = XLSX.utils.aoa_to_sheet(filas);
     hoja['!cols'] = [{ wch: 10 }, { wch: 45 }, { wch: 12 }, { wch: 14 }, { wch: 14 }];
+    if (pedidoEnMayusculas(req)) mayusculasEnHoja(hoja);
     const libro = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(libro, hoja, 'Control Financiero');
     const buffer = XLSX.write(libro, { type: 'buffer', bookType: 'xlsx' });
@@ -695,6 +697,7 @@ router.get('/admin/eventos/:evento_id/control-financiero/pdf', requireAuth, requ
     const { nombreEvento, anioEvento, ingresos, egresos, totalGlobal } = await obtenerReporteCompleto(evento_id);
 
     const doc = new PDFDocument({ margin: 40, size: 'LETTER' });
+    if (pedidoEnMayusculas(req)) aplicarMayusculas(doc);
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', `attachment; filename="control-ingresos-egresos-${evento_id}.pdf"`);
     doc.pipe(res);

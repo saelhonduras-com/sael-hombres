@@ -89,6 +89,7 @@ export default function AdminSaelistas() {
   }
   const [aspiranteFiltro, setAspiranteFiltro] = useState('');
   const [descargando, setDescargando] = useState('');
+  const [mayusculas, setMayusculas] = useState(false); // opción para PDF/Excel; por defecto apagada
 
   const [seleccionado, setSeleccionado] = useState(null); // detalle completo
   const [editandoId, setEditandoId] = useState(null); // id o 'nuevo'
@@ -242,7 +243,10 @@ export default function AdminSaelistas() {
     setDescargando(tipo);
     setError('');
     try {
-      const { data } = await api.get(`/admin/saelistas/${tipo}`, { params: parametrosDescarga(), responseType: 'blob' });
+      const { data } = await api.get(`/admin/saelistas/${tipo}`, {
+        params: mayusculas ? { ...parametrosDescarga(), mayusculas: 1 } : parametrosDescarga(),
+        responseType: 'blob',
+      });
       const url = window.URL.createObjectURL(new Blob([data]));
       const a = document.createElement('a');
       a.href = url;
@@ -369,7 +373,16 @@ export default function AdminSaelistas() {
       <div className="flex flex-wrap items-center justify-between gap-2">
         <h1 className="font-display text-2xl font-bold text-ink">Saelistas</h1>
         {vista === 'lista' && (
-          <div className="flex flex-wrap gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <label className="flex cursor-pointer items-center gap-1.5 text-xs font-semibold text-ink/70">
+              <input
+                type="checkbox"
+                checked={mayusculas}
+                onChange={(e) => setMayusculas(e.target.checked)}
+                className="h-4 w-4 accent-[#007334]"
+              />
+              Todo en mayúsculas
+            </label>
             <button
               onClick={() => descargar('excel')}
               disabled={!!descargando || lista.length === 0}
