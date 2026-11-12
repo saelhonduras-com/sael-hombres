@@ -140,9 +140,7 @@ export default function AdminLayout() {
                 <div className="flex justify-between"><dt className="text-ink/50">Confirmados</dt><dd className="font-bold text-ink">{estadisticas.total}</dd></div>
                 <div className="flex justify-between border-t border-[#1F3464]/15 pt-1"><dt className="text-ink/50">Nacionales</dt><dd className="font-bold text-ink">{estadisticas.nacional}</dd></div>
                 <div className="flex justify-between"><dt className="text-ink/50">Extranjeros</dt><dd className="font-bold text-ink">{estadisticas.extranjero}</dd></div>
-                {estadisticas.menor > 0 && (
-                  <div className="flex justify-between"><dt className="text-ink/50">Menores</dt><dd className="font-bold text-ink">{estadisticas.menor}</dd></div>
-                )}
+                <div className="flex justify-between"><dt className="text-ink/50">Menores</dt><dd className="font-bold text-ink">{estadisticas.menor ?? 0}</dd></div>
                 <div className="flex justify-between border-t border-[#1F3464]/15 pt-1"><dt className="text-ink/50">Boletos entregados</dt><dd className="font-bold text-ink">{estadisticas.total}</dd></div>
                 <div className="flex justify-between border-t border-[#1F3464]/15 pt-1"><dt className="text-ink/50">Saelistas asistiendo</dt><dd className="font-bold text-ink">{estadisticas.saelistas_asistencia ?? 0}</dd></div>
               </dl>

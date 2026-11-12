@@ -786,16 +786,17 @@ router.post('/admin/participantes/extranjero', requireAuth, requireModulo('parti
 });
 
 // Admin: agrega un MENOR de edad manualmente y lo inscribe de una vez al evento
-// indicado. Los menores no tienen DNI, así que el sistema les asigna un código
-// interno propio (MEN-00001…). El código lleva guion a propósito: así NO pasa
-// la validación de DNI ni de pasaporte, y nadie puede consultar los datos de
-// un menor desde el formulario público. El responsable se guarda como contacto
+// indicado. Los menores normalmente no tienen DNI, así que el sistema les asigna
+// un código interno propio (MEN-00001…); el código lleva guion a propósito para
+// que NO pase la validación de DNI ni de pasaporte. Si el menor SÍ trae un número
+// de identidad de 13 dígitos (campo opcional), se guarda ese como su DNI y podrá
+// inscribirse también desde el formulario público. El responsable se guarda como contacto
 // de emergencia (obligatorio). Si ya existe alguien con el mismo nombre y fecha
 // de nacimiento, no se crea otro: se avisa para inscribir al existente y así
 // no duplicar registros en cada evento.
 router.post('/admin/participantes/menor', requireAuth, requireModulo('participantes', 'edicion'), async (req, res) => {
   const {
-    nombre_completo, fecha_nacimiento,
+    numero_identificacion, nombre_completo, fecha_nacimiento,
     departamento, municipio, capitulo, zona,
     contacto_emergencia_nombre, contacto_emergencia_telefono,
     evento_id,
@@ -816,6 +817,10 @@ router.post('/admin/participantes/menor', requireAuth, requireModulo('participan
   if (!evento_id) {
     return res.status(400).json({ error: 'Debes seleccionar el evento SAEL al que se inscribe.' });
   }
+  const dni = (numero_identificacion || '').trim();
+  if (dni && !validarDni(dni)) {
+    return res.status(400).json({ error: 'El DNI debe tener 13 dígitos (o déjalo vacío para asignar un código interno).' });
+  }
 
   const client = await pool.connect();
   try {
@@ -829,6 +834,21 @@ router.post('/admin/participantes/menor', requireAuth, requireModulo('participan
     if (!evento.rows[0].abierto) {
       await client.query('ROLLBACK');
       return res.status(400).json({ error: 'El registro para este evento está cerrado.' });
+    }
+
+    if (dni) {
+      const yaExiste = await client.query(
+        `SELECT id, nombre_completo, numero_identificacion FROM participantes WHERE numero_identificacion = $1`,
+        [dni]
+      );
+      if (yaExiste.rows.length > 0) {
+        await client.query('ROLLBACK');
+        return res.status(409).json({
+          duplicado: true,
+          participante: yaExiste.rows[0],
+          error: `Ese DNI ya está registrado a nombre de ${yaExiste.rows[0].nombre_completo}. No se creó otro registro.`,
+        });
+      }
     }
 
     const nombreLimpio = nombre_completo.trim().replace(/\s+/g, ' ');
@@ -850,8 +870,11 @@ router.post('/admin/participantes/menor', requireAuth, requireModulo('participan
       });
     }
 
-    const { rows: seq } = await client.query(`SELECT nextval('menores_codigo_seq') AS n`);
-    const codigo = `MEN-${String(seq[0].n).padStart(5, '0')}`;
+    let identificacion = dni;
+    if (!dni) {
+      const { rows: seq } = await client.query(`SELECT nextval('menores_codigo_seq') AS n`);
+      identificacion = `MEN-${String(seq[0].n).padStart(5, '0')}`;
+    }
 
     const participante = await client.query(
       `INSERT INTO participantes (
@@ -859,12 +882,13 @@ router.post('/admin/participantes/menor', requireAuth, requireModulo('participan
         nombre_completo, fecha_nacimiento,
         departamento, municipio, capitulo, zona,
         contacto_emergencia_nombre, contacto_emergencia_telefono
-      ) VALUES ($1,'Código interno','menor',$2,$3,$4,$5,$6,$7,$8,$9)
+      ) VALUES ($1,$10,'menor',$2,$3,$4,$5,$6,$7,$8,$9)
       RETURNING id, nombre_completo, numero_identificacion`,
       [
-        codigo, nombreLimpio, fecha_nacimiento,
+        identificacion, nombreLimpio, fecha_nacimiento,
         departamento || null, municipio || null, capitulo || null, zona || null,
         contacto_emergencia_nombre.trim(), contacto_emergencia_telefono,
+        dni ? 'DNI' : 'Código interno',
       ]
     );
 
@@ -877,6 +901,9 @@ router.post('/admin/participantes/menor', requireAuth, requireModulo('participan
     res.status(201).json(participante.rows[0]);
   } catch (err) {
     await client.query('ROLLBACK');
+    if (err.code === '23505') {
+      return res.status(409).json({ error: 'Ese DNI ya está registrado.' });
+    }
     res.status(500).json({ error: 'No se pudo completar el registro del menor.' });
   } finally {
     client.release();

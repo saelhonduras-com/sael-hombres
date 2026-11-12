@@ -1,10 +1,11 @@
-import { useEffect, useState, useRef } from 'react';
+import { Fragment, useEffect, useState, useRef } from 'react';
 import { useOutletContext } from 'react-router-dom';
 import api, { mensajeError } from '../../api';
 import {
   DEPARTAMENTOS_HONDURAS,
   MUNICIPIOS_POR_DEPARTAMENTO,
   ZONAS_FIHNEC,
+  ZONAS_POR_DEPARTAMENTO,
   CARGOS_FIHNEC,
   ESTADOS_CIVILES,
 } from '../../listas';
@@ -29,8 +30,17 @@ const vacioExtranjero = {
   evento_id: '',
 };
 
+// Zonas que corresponden al departamento elegido (mismo criterio que el
+// formulario público). Sin zonas asignadas (ej. Gracias a Dios) → lista
+// completa. Si la persona ya tenía una zona guardada que no está en la
+// lista, se conserva como opción para no perderla al editar.
+function zonasDeDepartamento(departamento, zonaActual) {
+  const base = departamento ? (ZONAS_POR_DEPARTAMENTO[departamento] || ZONAS_FIHNEC) : [];
+  return zonaActual && !base.includes(zonaActual) ? [...base, zonaActual] : base;
+}
+
 const vacioMenor = {
-  nombre_completo: '', fecha_nacimiento: '',
+  numero_identificacion: '', nombre_completo: '', fecha_nacimiento: '',
   contacto_emergencia_nombre: '', contacto_emergencia_telefono: '',
   departamento: '', municipio: '', capitulo: '', zona: '',
   evento_id: '',
@@ -82,7 +92,7 @@ export default function AdminParticipantes() {
   const sentinelRef = useRef(null);
 
   // --- "Inscribiéndose ahora" (evento actual, checkbox en línea) ---
-  const [modoLista, setModoLista] = useState('actual'); // 'actual' | 'todos'
+  const [modoLista, setModoLista] = useState('actual'); // 'actual' | 'cumple' | 'todos'
   const [inscripcionesActual, setInscripcionesActual] = useState([]);
   const [totalActual, setTotalActual] = useState(0);
   const [registradosActual, setRegistradosActual] = useState(0);
@@ -177,6 +187,8 @@ export default function AdminParticipantes() {
   function refrescarListaActual() {
     if (modoLista === 'actual') {
       cargarInscripcionesEventoActual(buscarActualRef.current);
+    } else if (modoLista === 'cumple') {
+      cargarInscripcionesEventoActual('');
     } else {
       cargarParticipantes(filtrosRef.current, 1, true);
     }
@@ -216,8 +228,8 @@ export default function AdminParticipantes() {
   }
 
   useEffect(() => {
-    if (modoLista === 'actual' && eventoActual) {
-      cargarInscripcionesEventoActual(buscarActual);
+    if ((modoLista === 'actual' || modoLista === 'cumple') && eventoActual) {
+      cargarInscripcionesEventoActual(modoLista === 'cumple' ? '' : buscarActual);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [modoLista, eventoActual]);
@@ -600,6 +612,60 @@ export default function AdminParticipantes() {
   // Honduras es UTC-6 todo el año
   const hoyHN = new Date(Date.now() - 6 * 60 * 60 * 1000).toISOString().slice(0, 10);
 
+  // Cumpleañeros agrupados por día del evento (viernes, sábado, domingo…), en orden.
+  const gruposCumple = [];
+  cumpleaneros.forEach((c) => {
+    const clave = c.dia.toISOString().slice(0, 10);
+    let grupo = gruposCumple.find((g) => g.clave === clave);
+    if (!grupo) { grupo = { clave, dia: c.dia, items: [] }; gruposCumple.push(grupo); }
+    grupo.items.push(c);
+  });
+  function textoDia(d) {
+    const t = d.toLocaleDateString('es-HN', { weekday: 'long', day: 'numeric', month: 'long', timeZone: 'UTC' });
+    return t.charAt(0).toUpperCase() + t.slice(1);
+  }
+  function llegoDe(c) {
+    return inscripcionesActual.find((x) => x.inscripcion_id === c.inscripcion_id)?.registrado_presencial ?? c.registrado_presencial;
+  }
+  function procedenciaDe(c) {
+    return c.departamento ? `${c.departamento}${c.municipio ? ', ' + c.municipio : ''}` : '—';
+  }
+
+  // Abre una hoja limpia (solo encabezado del evento + la tabla) y lanza la impresión.
+  function imprimirCumpleaneros() {
+    const esc = (t) => String(t ?? '').replace(/[&<>"']/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]));
+    let n = 0;
+    const filas = gruposCumple.map((g) =>
+      `<tr class="dia"><td colspan="6">${esc(textoDia(g.dia))}</td></tr>` +
+      g.items.map((c) => {
+        n += 1;
+        return `<tr><td>${n}</td><td>${esc(c.nombre_completo)}${c.tipo_participante === 'menor' ? ' (menor)' : ''}</td><td>${c.edad}</td><td>${esc(c.capitulo || '—')}</td><td>${esc(c.zona || '—')}</td><td>${esc(procedenciaDe(c))}</td></tr>`;
+      }).join('')
+    ).join('');
+    const w = window.open('', '_blank');
+    if (!w) {
+      setError('El navegador bloqueó la ventana de impresión. Permite las ventanas emergentes para este sitio e inténtalo de nuevo.');
+      return;
+    }
+    w.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>Cumpleañeros - ${esc(eventoActual.nombre)}</title>
+<style>
+  body{font-family:Arial,Helvetica,sans-serif;margin:24px;color:#111}
+  h1{font-size:20px;margin:0}
+  p{margin:4px 0 14px;color:#444;font-size:13px}
+  table{border-collapse:collapse;width:100%;font-size:13px}
+  th,td{border:1px solid #999;padding:6px 8px;text-align:left}
+  th{background:#e5e7eb}
+  tr.dia td{background:#fdf2c4;font-weight:bold}
+</style></head><body>
+<h1>🎂 Cumpleañeros — ${esc(eventoActual.nombre)}</h1>
+<p>Del ${esc(fechaDMA(eventoActual.fecha_inicio))} al ${esc(fechaDMA(eventoActual.fecha_fin))} · Total: ${cumpleaneros.length}</p>
+<table><thead><tr><th>#</th><th>Nombre</th><th>Cumple</th><th>Capítulo</th><th>Zona</th><th>Procedencia</th></tr></thead><tbody>${filas}</tbody></table>
+</body></html>`);
+    w.document.close();
+    w.focus();
+    setTimeout(() => w.print(), 300);
+  }
+
   const municipiosEditar = formEditar ? (MUNICIPIOS_POR_DEPARTAMENTO[formEditar.departamento] || []) : [];
   const municipiosExtranjero = MUNICIPIOS_POR_DEPARTAMENTO[formExtranjero.departamento] || [];
   const municipiosMenor = MUNICIPIOS_POR_DEPARTAMENTO[formMenor.departamento] || [];
@@ -629,6 +695,9 @@ export default function AdminParticipantes() {
               <div className="flex flex-wrap gap-2">
                 <button onClick={() => setModoLista('actual')} className={claseTab(modoLista === 'actual')}>
                   ★ Inscribiéndose ahora
+                </button>
+                <button onClick={() => setModoLista('cumple')} className={claseTab(modoLista === 'cumple')}>
+                  🎂 Cumpleañeros ({cumpleaneros.length})
                 </button>
                 <button onClick={() => setModoLista('todos')} className={claseTab(modoLista === 'todos')}>
                   Todos los participantes
@@ -670,26 +739,33 @@ export default function AdminParticipantes() {
 
                     {cumpleaneros.length > 0 && (
                       <div className="mt-4 rounded-2xl border-2 border-gold bg-gold/15 px-5 py-4">
-                        <p className="font-display text-lg font-bold text-night">
-                          🎂 ¡Cumpleañeros del evento! — ¡a cantarles las mañanitas!
-                        </p>
-                        <ul className="mt-2 space-y-1.5">
-                          {cumpleaneros.map((c) => {
-                            const llego = inscripcionesActual.find((x) => x.inscripcion_id === c.inscripcion_id)?.registrado_presencial ?? c.registrado_presencial;
-                            const esHoy = c.dia.toISOString().slice(0, 10) === hoyHN;
-                            const diaTexto = c.dia.toLocaleDateString('es-HN', { weekday: 'long', day: 'numeric', month: 'long', timeZone: 'UTC' });
-                            return (
-                              <li key={c.inscripcion_id} className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-ink">
-                                <span className="font-semibold">{c.nombre_completo}</span>
-                                <span className="text-ink/70">cumple {c.edad} años el {diaTexto}</span>
-                                {esHoy && <span className="rounded-full bg-ember px-2 py-0.5 text-xs font-bold text-white">HOY</span>}
-                                <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${llego ? 'bg-[#007334]/15 text-[#007334]' : 'bg-ink/10 text-ink/50'}`}>
-                                  {llego ? 'Ya llegó' : 'Aún no registrado'}
-                                </span>
-                              </li>
-                            );
-                          })}
-                        </ul>
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <p className="font-display text-lg font-bold text-night">
+                            🎂 ¡Cumpleañeros del evento! ({cumpleaneros.length}) — ¡a cantarles las mañanitas!
+                          </p>
+                          <button onClick={() => setModoLista('cumple')} className="rounded-full border border-night/30 px-3 py-1 text-xs font-semibold text-night hover:bg-night/5">
+                            Ver tabla / imprimir
+                          </button>
+                        </div>
+                        <div className="mt-2 space-y-2">
+                          {gruposCumple.map((g) => (
+                            <div key={g.clave}>
+                              <p className="text-xs font-bold uppercase tracking-wide text-night/70">
+                                {textoDia(g.dia)}
+                                {g.clave === hoyHN && <span className="ml-2 rounded-full bg-ember px-2 py-0.5 text-[10px] font-bold text-white">HOY</span>}
+                              </p>
+                              <p className="mt-0.5 flex flex-wrap gap-x-4 gap-y-1 text-sm text-ink">
+                                {g.items.map((c) => (
+                                  <span key={c.inscripcion_id} className="whitespace-nowrap">
+                                    <span className="font-semibold">{c.nombre_completo}</span>
+                                    <span className="text-ink/60"> ({c.edad})</span>
+                                    {llegoDe(c) && <span title="Ya llegó" className="ml-1 text-[#007334]">✓</span>}
+                                  </span>
+                                ))}
+                              </p>
+                            </div>
+                          ))}
+                        </div>
                       </div>
                     )}
 
@@ -778,6 +854,79 @@ export default function AdminParticipantes() {
                                   </button>
                                 </td>
                               </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+                  </>
+                )}
+              </div>
+            )}
+
+            {modoLista === 'cumple' && (
+              <div>
+                {!eventoActual ? (
+                  <p className="mt-4 text-sm text-ink/40">No hay un evento SAEL marcado como actual/abierto en este momento.</p>
+                ) : (
+                  <>
+                    <div className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-2xl border-2 border-gold bg-gold/15 px-5 py-3">
+                      <div>
+                        <p className="font-display text-lg font-bold text-night">🎂 Cumpleañeros de {eventoActual.nombre} ({cumpleaneros.length})</p>
+                        <p className="text-xs text-ink/60">
+                          Quienes cumplen años del {fechaDMA(eventoActual.fecha_inicio)} al {fechaDMA(eventoActual.fecha_fin)}, ordenados por día.
+                        </p>
+                      </div>
+                      <button
+                        onClick={imprimirCumpleaneros}
+                        disabled={cumpleaneros.length === 0}
+                        className="rounded-full bg-[#007334] px-5 py-2 text-sm font-semibold text-white hover:bg-[#005c29] disabled:cursor-not-allowed disabled:opacity-40"
+                      >
+                        Imprimir lista
+                      </button>
+                    </div>
+
+                    {cargandoActual ? <p className="mt-6 text-ink/40">Cargando…</p> : (
+                      <div className="mt-3 overflow-x-auto rounded-2xl border border-ink/10 bg-white shadow-sm">
+                        <table className="w-full text-sm">
+                          <thead>
+                            <tr className="border-b border-ink/10 bg-[#1F3464]/12 text-left text-xs uppercase tracking-wide text-[#1F3464]">
+                              <th className="px-4 py-3">Nombre</th>
+                              <th className="px-4 py-3">Cumple</th>
+                              <th className="px-4 py-3">Capítulo</th>
+                              <th className="px-4 py-3">Zona</th>
+                              <th className="px-4 py-3">Procedencia</th>
+                              <th className="px-4 py-3 text-center">Registrado</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {cumpleaneros.length === 0 && (
+                              <tr><td colSpan={6} className="px-4 py-6 text-center text-ink/40">Nadie de los inscritos cumple años durante este evento.</td></tr>
+                            )}
+                            {gruposCumple.map((g) => (
+                              <Fragment key={g.clave}>
+                                <tr className="bg-gold/20">
+                                  <td colSpan={6} className="px-4 py-2 text-xs font-bold uppercase tracking-wide text-night">
+                                    {textoDia(g.dia)} · {g.items.length}
+                                    {g.clave === hoyHN && <span className="ml-2 rounded-full bg-ember px-2 py-0.5 text-[10px] font-bold text-white">HOY</span>}
+                                  </td>
+                                </tr>
+                                {g.items.map((c) => (
+                                  <tr key={c.inscripcion_id} className="border-b border-ink/5 last:border-0">
+                                    <td className="px-4 py-3 font-medium text-ink">
+                                      {c.nombre_completo}
+                                      {c.tipo_participante === 'menor' && (
+                                        <span className="ml-2 rounded-full bg-gold/30 px-2 py-0.5 text-xs font-semibold text-night">Menor</span>
+                                      )}
+                                    </td>
+                                    <td className="px-4 py-3 text-ink/60">{c.edad} años</td>
+                                    <td className="px-4 py-3 text-ink/60">{c.capitulo || '—'}</td>
+                                    <td className="px-4 py-3 text-ink/60">{c.zona || '—'}</td>
+                                    <td className="px-4 py-3 text-ink/60">{procedenciaDe(c)}</td>
+                                    <td className="px-4 py-3 text-center">{llegoDe(c) ? <span className="font-semibold text-[#007334]">Ya llegó ✓</span> : <span className="text-ink/30">—</span>}</td>
+                                  </tr>
+                                ))}
+                              </Fragment>
                             ))}
                           </tbody>
                         </table>
@@ -960,7 +1109,7 @@ export default function AdminParticipantes() {
             </label>
             <label>
               <span className="mb-1 block text-xs font-semibold text-ink/60">Departamento</span>
-              <select value={formEditar.departamento} onChange={(e) => setFormEditar((f) => ({ ...f, departamento: e.target.value, municipio: '' }))} className={claseInput}>
+              <select value={formEditar.departamento} onChange={(e) => setFormEditar((f) => ({ ...f, departamento: e.target.value, municipio: '', zona: '' }))} className={claseInput}>
                 <option value="">Seleccionar…</option>
                 {DEPARTAMENTOS_HONDURAS.map((d) => <option key={d} value={d}>{d}</option>)}
               </select>
@@ -978,9 +1127,9 @@ export default function AdminParticipantes() {
             </label>
             <label>
               <span className="mb-1 block text-xs font-semibold text-ink/60">Zona</span>
-              <select value={formEditar.zona} onChange={(e) => setFormEditar((f) => ({ ...f, zona: e.target.value }))} className={claseInput}>
-                <option value="">Seleccionar…</option>
-                {ZONAS_FIHNEC.map((z) => <option key={z} value={z}>{z}</option>)}
+              <select value={formEditar.zona} onChange={(e) => setFormEditar((f) => ({ ...f, zona: e.target.value }))} disabled={!formEditar.departamento} className={`${claseInput} disabled:bg-ink/5`}>
+                <option value="">{formEditar.departamento ? 'Seleccionar…' : 'Primero elige un departamento'}</option>
+                {zonasDeDepartamento(formEditar.departamento, formEditar.zona).map((z) => <option key={z} value={z}>{z}</option>)}
               </select>
             </label>
             <label>
@@ -1067,7 +1216,7 @@ export default function AdminParticipantes() {
             </label>
             <label>
               <span className="mb-1 block text-xs font-semibold text-ink/60">Departamento</span>
-              <select value={formExtranjero.departamento} onChange={(e) => setFormExtranjero((f) => ({ ...f, departamento: e.target.value, municipio: '' }))} className={claseInput}>
+              <select value={formExtranjero.departamento} onChange={(e) => setFormExtranjero((f) => ({ ...f, departamento: e.target.value, municipio: '', zona: '' }))} className={claseInput}>
                 <option value="">Seleccionar…</option>
                 {DEPARTAMENTOS_HONDURAS.map((d) => <option key={d} value={d}>{d}</option>)}
               </select>
@@ -1085,9 +1234,9 @@ export default function AdminParticipantes() {
             </label>
             <label>
               <span className="mb-1 block text-xs font-semibold text-ink/60">Zona</span>
-              <select value={formExtranjero.zona} onChange={(e) => setFormExtranjero((f) => ({ ...f, zona: e.target.value }))} className={claseInput}>
-                <option value="">Seleccionar…</option>
-                {ZONAS_FIHNEC.map((z) => <option key={z} value={z}>{z}</option>)}
+              <select value={formExtranjero.zona} onChange={(e) => setFormExtranjero((f) => ({ ...f, zona: e.target.value }))} disabled={!formExtranjero.departamento} className={`${claseInput} disabled:bg-ink/5`}>
+                <option value="">{formExtranjero.departamento ? 'Seleccionar…' : 'Primero elige un departamento'}</option>
+                {zonasDeDepartamento(formExtranjero.departamento, formExtranjero.zona).map((z) => <option key={z} value={z}>{z}</option>)}
               </select>
             </label>
             <label>
@@ -1144,8 +1293,8 @@ export default function AdminParticipantes() {
         <div className="mx-auto mt-4 max-w-2xl rounded-2xl border border-ink/10 bg-white p-6 shadow-sm">
           <h2 className="font-display text-lg font-bold text-ink">Agregar menor de edad</h2>
           <p className="mt-1 text-xs text-ink/50">
-            Los menores no tienen DNI: el sistema les asigna un código interno (MEN-00001…) y quedan inscritos de
-            una vez al evento. Se registran una sola vez; en los siguientes eventos se busca al menor en
+            Si el menor no tiene DNI, el sistema le asigna un código interno (MEN-00001…); si lo trae, anótalo.
+            Queda inscrito de una vez al evento. Se registran una sola vez; en los siguientes eventos se busca al menor en
             "Todos los participantes" y se usa "Inscribir" en su detalle. Si ya existe alguien con el mismo nombre
             y fecha de nacimiento, el sistema avisa y no crea otro.
           </p>
@@ -1154,6 +1303,15 @@ export default function AdminParticipantes() {
             <label className="sm:col-span-2">
               <span className="mb-1 block text-xs font-semibold text-ink/60">Nombre completo del menor *</span>
               <input type="text" value={formMenor.nombre_completo} onChange={(e) => setFormMenor((f) => ({ ...f, nombre_completo: e.target.value }))} className={claseInput} />
+            </label>
+            <label className="sm:col-span-2">
+              <span className="mb-1 block text-xs font-semibold text-ink/60">DNI / número de identidad (opcional, 13 dígitos)</span>
+              <input
+                type="text" inputMode="numeric" maxLength={13} value={formMenor.numero_identificacion}
+                onChange={(e) => setFormMenor((f) => ({ ...f, numero_identificacion: e.target.value.replace(/\D/g, '').slice(0, 13) }))}
+                className={claseInput} placeholder="Si no lo trae, déjalo vacío y se le asigna un código MEN-"
+              />
+              <p className="mt-1 text-xs text-ink/40">Con DNI, el menor también podrá inscribirse solo desde el formulario público.</p>
             </label>
             <div>
               <span className="mb-1 block text-xs font-semibold text-ink/60">Fecha de nacimiento *</span>
@@ -1176,7 +1334,7 @@ export default function AdminParticipantes() {
             </label>
             <label>
               <span className="mb-1 block text-xs font-semibold text-ink/60">Departamento</span>
-              <select value={formMenor.departamento} onChange={(e) => setFormMenor((f) => ({ ...f, departamento: e.target.value, municipio: '' }))} className={claseInput}>
+              <select value={formMenor.departamento} onChange={(e) => setFormMenor((f) => ({ ...f, departamento: e.target.value, municipio: '', zona: '' }))} className={claseInput}>
                 <option value="">Seleccionar…</option>
                 {DEPARTAMENTOS_HONDURAS.map((d) => <option key={d} value={d}>{d}</option>)}
               </select>
@@ -1194,9 +1352,9 @@ export default function AdminParticipantes() {
             </label>
             <label>
               <span className="mb-1 block text-xs font-semibold text-ink/60">Zona</span>
-              <select value={formMenor.zona} onChange={(e) => setFormMenor((f) => ({ ...f, zona: e.target.value }))} className={claseInput}>
-                <option value="">Seleccionar…</option>
-                {ZONAS_FIHNEC.map((z) => <option key={z} value={z}>{z}</option>)}
+              <select value={formMenor.zona} onChange={(e) => setFormMenor((f) => ({ ...f, zona: e.target.value }))} disabled={!formMenor.departamento} className={`${claseInput} disabled:bg-ink/5`}>
+                <option value="">{formMenor.departamento ? 'Seleccionar…' : 'Primero elige un departamento'}</option>
+                {zonasDeDepartamento(formMenor.departamento, formMenor.zona).map((z) => <option key={z} value={z}>{z}</option>)}
               </select>
             </label>
           </div>
