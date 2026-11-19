@@ -143,16 +143,16 @@ export default function AdminControlIngresosEgresos() {
       )}
 
       <div className="mt-4 flex flex-wrap items-center justify-between gap-2 print:hidden">
-        <div className="flex gap-2">
+        <div className="inline-flex gap-0.5 rounded-xl border border-night/15 bg-white p-1">
           <button
             onClick={() => setPestana('ingresos')}
-            className={`rounded-full px-4 py-1.5 text-xs font-semibold ${pestana === 'ingresos' ? 'bg-[#007334] text-white' : 'border border-ink/20 text-ink/70 hover:bg-ink/5'}`}
+            className={`rounded-lg px-4 py-2 text-sm font-semibold transition ${pestana === 'ingresos' ? 'bg-[#007334] text-white shadow-sm' : 'text-night/60 hover:bg-night/5 hover:text-night'}`}
           >
             Ingresos
           </button>
           <button
             onClick={() => setPestana('egresos')}
-            className={`rounded-full px-4 py-1.5 text-xs font-semibold ${pestana === 'egresos' ? 'bg-ember text-white' : 'border border-ink/20 text-ink/70 hover:bg-ink/5'}`}
+            className={`rounded-lg px-4 py-2 text-sm font-semibold transition ${pestana === 'egresos' ? 'bg-ember text-white shadow-sm' : 'text-night/60 hover:bg-night/5 hover:text-night'}`}
           >
             Egresos
           </button>

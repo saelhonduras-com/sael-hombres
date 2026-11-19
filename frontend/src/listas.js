@@ -40,6 +40,8 @@ export const MUNICIPIOS_POR_DEPARTAMENTO = {
   "Yoro": ["Arenal", "El Negrito", "El Progreso", "Jocon", "Morazan", "Olanchito", "Santa Rita", "Sulaco", "Victoria", "Yorito", "Yoro"]
 };
 
+export const nombreZona = (z) => String(z || '').replace(/^Zona\s+/i, '');
+
 export const ZONAS_FIHNEC = [
   "Aguán 1",
   "Aguán 2",

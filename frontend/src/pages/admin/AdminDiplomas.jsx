@@ -166,9 +166,35 @@ export default function AdminDiplomas() {
       {error && <p className="mt-4 rounded-lg bg-ember/10 p-3 text-sm text-ember">{error}</p>}
 
       {/* INVENTARIO DE DIPLOMAS — standalone, no depende del evento actual */}
-      <div className="mt-4 overflow-hidden rounded-2xl border border-ink/10 bg-white shadow-sm print:hidden">
-        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-ink/10 bg-[#007334]/10 px-4 py-3">
-          <h2 className="font-display text-base font-bold text-[#007334]">Inventario de Diplomas</h2>
+      <div className="mt-4 flex flex-wrap items-center gap-x-5 gap-y-2 rounded-2xl border border-ink/10 bg-white px-4 py-2.5 shadow-sm print:hidden">
+        <h2 className="font-display text-base font-bold text-[#007334]">Inventario de Diplomas</h2>
+        <label className="flex items-center gap-2">
+          <span className="text-xs font-semibold uppercase leading-tight tracking-wide text-ink/40">Inicial<span className="block text-[10px] font-normal normal-case tracking-normal">ya usados</span></span>
+          <input
+            type="number" min="0" value={inventarioUsado} onChange={(e) => setInventarioUsado(e.target.value)}
+            disabled={!modoEdicionInventario}
+            className="w-20 rounded-lg border border-ink/15 px-2 py-1 text-center text-sm font-semibold text-ink disabled:border-transparent disabled:bg-transparent"
+            placeholder="330"
+          />
+        </label>
+        <label className="flex items-center gap-2">
+          <span className="text-xs font-semibold uppercase leading-tight tracking-wide text-ink/40">Final<span className="block text-[10px] font-normal normal-case tracking-normal">total existentes</span></span>
+          <input
+            type="number" min="0" value={inventarioExistentes} onChange={(e) => setInventarioExistentes(e.target.value)}
+            disabled={!modoEdicionInventario}
+            className="w-20 rounded-lg border border-ink/15 px-2 py-1 text-center text-sm font-semibold text-ink disabled:border-transparent disabled:bg-transparent"
+            placeholder="1000"
+          />
+        </label>
+        <div className="flex items-center gap-2 rounded-xl bg-ink/5 px-3 py-1.5">
+          <span className="text-xs font-semibold uppercase tracking-wide text-ink/40">Disponibles</span>
+          <span className="font-display text-lg font-bold text-[#007334]">
+            {inventarioUsado !== '' && inventarioExistentes !== ''
+              ? Number(inventarioExistentes) - Number(inventarioUsado)
+              : '—'}
+          </span>
+        </div>
+        <div className="ml-auto flex items-center gap-2">
           <button
             onClick={() => setModoEdicionInventario((m) => !m)}
             className={`rounded-full px-4 py-1.5 text-xs font-semibold transition ${
@@ -177,38 +203,6 @@ export default function AdminDiplomas() {
           >
             {modoEdicionInventario ? '🔓 Edición activada' : '🔒 Activar edición'}
           </button>
-        </div>
-        <div className="grid grid-cols-3 divide-x divide-ink/10 text-center">
-          <div className="p-3">
-            <p className="text-xs font-semibold uppercase tracking-wide text-ink/40">Inventario Inicial</p>
-            <p className="text-[10px] text-ink/40">Diplomas ya usados</p>
-            <input
-              type="number" min="0" value={inventarioUsado} onChange={(e) => setInventarioUsado(e.target.value)}
-              disabled={!modoEdicionInventario}
-              className="mt-1 w-full rounded-lg border border-ink/15 px-2 py-1 text-center text-sm font-semibold text-ink disabled:border-transparent disabled:bg-transparent"
-              placeholder="330"
-            />
-          </div>
-          <div className="p-3">
-            <p className="text-xs font-semibold uppercase tracking-wide text-ink/40">Inventario Final</p>
-            <p className="text-[10px] text-ink/40">Total existentes</p>
-            <input
-              type="number" min="0" value={inventarioExistentes} onChange={(e) => setInventarioExistentes(e.target.value)}
-              disabled={!modoEdicionInventario}
-              className="mt-1 w-full rounded-lg border border-ink/15 px-2 py-1 text-center text-sm font-semibold text-ink disabled:border-transparent disabled:bg-transparent"
-              placeholder="1000"
-            />
-          </div>
-          <div className="bg-ink/5 p-3">
-            <p className="text-xs font-semibold uppercase tracking-wide text-ink/40">Disponibles</p>
-            <p className="mt-1 font-display text-lg font-bold text-[#007334]">
-              {inventarioUsado !== '' && inventarioExistentes !== ''
-                ? Number(inventarioExistentes) - Number(inventarioUsado)
-                : '—'}
-            </p>
-          </div>
-        </div>
-        <div className="border-t border-ink/10 p-3 text-right">
           <button onClick={guardarInventario} disabled={guardandoInventario || !modoEdicionInventario} className="rounded-full bg-[#007334] px-4 py-1.5 text-xs font-semibold text-white hover:bg-[#005c29] disabled:opacity-50">
             {guardandoInventario ? 'Guardando…' : 'Guardar'}
           </button>
@@ -250,13 +244,14 @@ export default function AdminDiplomas() {
                     <th className="px-4 py-3">Nombre</th>
                     <th className="px-4 py-3">1er SAEL</th>
                     <th className="px-4 py-3">Efectivo</th>
-                    <th className="px-4 py-3">Transferencia Bancaria</th>
-                    <th className="px-4 py-3">Tarjeta crédito/débito</th>
+                    <th className="px-4 py-3" title="Transferencia bancaria">Transf.</th>
+                    <th className="px-4 py-3" title="Tarjeta de crédito / débito">Tarjeta C/D</th>
+                    <th className="px-4 py-3" title="Inscripción sin costo">Cortesía</th>
                   </tr>
                 </thead>
                 <tbody>
                   {(!datos || datos.filas.length === 0) && (
-                    <tr><td colSpan={9} className="px-4 py-6 text-center text-ink/40">Todavía no hay participantes con asistencia confirmada en este evento.</td></tr>
+                    <tr><td colSpan={10} className="px-4 py-6 text-center text-ink/40">Todavía no hay participantes con asistencia confirmada en este evento.</td></tr>
                   )}
                   {datos?.filas.slice((pagina - 1) * POR_PAGINA, pagina * POR_PAGINA).map((f) => (
                     <tr key={f.numero} className="border-b border-ink/5 text-left last:border-0">
@@ -266,9 +261,10 @@ export default function AdminDiplomas() {
                       <td className="px-4 py-3 text-ink/60">{f.procedencia || '—'}</td>
                       <td className="px-4 py-3 text-ink/60">{f.nombre_completo}</td>
                       <td className="px-4 py-3 text-ink/60">{f.primera_vez ? '1' : ''}</td>
-                      <td className="px-4 py-3 text-ink/60">{f.metodo_pago === 'efectivo' && f.alimentacion_monto ? `L. ${f.alimentacion_monto}` : ''}</td>
-                      <td className="px-4 py-3 text-ink/60">{f.metodo_pago === 'transferencia' && f.alimentacion_monto ? `L. ${f.alimentacion_monto}` : ''}</td>
-                      <td className="px-4 py-3 text-ink/60">{f.metodo_pago === 'tarjeta' && f.alimentacion_monto ? `L. ${f.alimentacion_monto}` : ''}</td>
+                      <td className="px-4 py-3 text-ink/60">{f.metodo_pago === 'efectivo' && Number(f.alimentacion_monto) > 0 ? `L. ${f.alimentacion_monto}` : ''}</td>
+                      <td className="px-4 py-3 text-ink/60">{f.metodo_pago === 'transferencia' && Number(f.alimentacion_monto) > 0 ? `L. ${f.alimentacion_monto}` : ''}</td>
+                      <td className="px-4 py-3 text-ink/60">{f.metodo_pago === 'tarjeta' && Number(f.alimentacion_monto) > 0 ? `L. ${f.alimentacion_monto}` : ''}</td>
+                      <td className="px-4 py-3 text-ink/60">{f.cortesia ? '1' : ''}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -281,6 +277,7 @@ export default function AdminDiplomas() {
                       <td className="px-4 py-3">L. {datos.totalesPago?.efectivo?.toFixed(2) ?? '0.00'}</td>
                       <td className="px-4 py-3">L. {datos.totalesPago?.transferencia?.toFixed(2) ?? '0.00'}</td>
                       <td className="px-4 py-3">L. {datos.totalesPago?.tarjeta?.toFixed(2) ?? '0.00'}</td>
+                      <td className="px-4 py-3">{datos.total_cortesia ?? 0}</td>
                     </tr>
                   </tfoot>
                 )}

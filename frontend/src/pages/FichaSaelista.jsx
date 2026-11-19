@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import api, { mensajeError } from '../api';
 import {
-  DEPARTAMENTOS_HONDURAS, MUNICIPIOS_POR_DEPARTAMENTO, ZONAS_FIHNEC,
+  DEPARTAMENTOS_HONDURAS, MUNICIPIOS_POR_DEPARTAMENTO, ZONAS_FIHNEC, nombreZona,
   CARGOS_FIHNEC, CARGOS_HISTORICO, ESTADOS_CIVILES,
   TIPOS_TESTIMONIO, FORMACION_OFICIAL, OTRAS_PARTICIPACIONES,
 } from '../listas';
@@ -350,7 +350,7 @@ export default function FichaSaelista() {
                 <span className="mb-1 block text-xs font-semibold text-ink/60">Zona</span>
                 <select value={form.zona} onChange={(e) => setForm((f) => ({ ...f, zona: e.target.value }))} className={claseInput}>
                   <option value="">Seleccionar…</option>
-                  {ZONAS_FIHNEC.map((z) => <option key={z} value={z}>{z}</option>)}
+                  {ZONAS_FIHNEC.map((z) => <option key={z} value={z}>{nombreZona(z)}</option>)}
                 </select>
               </label>
               <label>

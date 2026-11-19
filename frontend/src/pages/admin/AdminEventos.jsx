@@ -103,6 +103,8 @@ export default function AdminEventos() {
   const [negacion, setNegacion] = useState(false); // true = mostrar el modal de "esto no se puede"
   const [bloqueoMes, setBloqueoMes] = useState(null); // string | null = mensaje del bloqueo duro por mes en curso
   const [, setTick] = useState(0); // fuerza recalcular la cuenta regresiva cada 30s
+  const [menuAnio, setMenuAnio] = useState(false); // lista desplegable de años abierta
+  const [anioFiltro, setAnioFiltro] = useState(null); // año elegido en la tabla; null = el año actual (o el más reciente)
 
   useEffect(() => {
     const intervalo = setInterval(() => setTick((t) => t + 1), 30000);
@@ -180,6 +182,7 @@ export default function AdminEventos() {
         await api.put(`/admin/eventos/${editando}`, form);
       }
       setEditando(null);
+      if (form.anio) setAnioFiltro(Number(form.anio));
       cargar();
     } catch (err) {
       setError(mensajeError(err));
@@ -208,6 +211,13 @@ export default function AdminEventos() {
 
   // Para el aviso permanente de arriba — mismo criterio que usa guardar().
   const { mes: mesHoyBanner, anio: anioHoyBanner } = mesEnCursoHonduras();
+  // Filtro por año: la tabla muestra solo los eventos del año elegido.
+  const conteoPorAnio = eventos.reduce((acc, e) => { const a = Number(e.anio); acc[a] = (acc[a] || 0) + 1; return acc; }, {});
+  const aniosDisponibles = Object.keys(conteoPorAnio).map(Number).sort((a, b) => b - a);
+  const anioActivo = aniosDisponibles.includes(anioFiltro) ? anioFiltro
+    : aniosDisponibles.includes(anioHoyBanner) ? anioHoyBanner
+    : aniosDisponibles[0];
+  const eventosVisibles = eventos.filter((e) => Number(e.anio) === anioActivo);
   const eventoDelMesActual = eventos.find((e) => Number(e.mes) === mesHoyBanner && Number(e.anio) === anioHoyBanner);
 
   return (
@@ -367,68 +377,116 @@ export default function AdminEventos() {
 
       {!editando && (
         cargando ? <p className="mt-6 text-ink/40">Cargando…</p> : (
-          <div className="mt-4 space-y-2">
-            {eventos.length === 0 && <p className="text-sm text-ink/40">Sin eventos registrados todavía.</p>}
-            {eventos.map((ev) => {
-              const cuenta = ev.abierto ? calcularCuentaRegresiva(ev.fecha_limite_registro.slice(0, 10), ev.hora_limite_registro) : null;
-              const conteo = conteos[ev.id];
-              return (
-                <div key={ev.id} className="flex flex-wrap items-center gap-x-6 gap-y-2 rounded-xl border border-ink/10 bg-white p-3 shadow-sm">
-                  <div>
-                    <p className="flex flex-wrap items-center gap-2">
-                      <span className="font-semibold text-ink">{ev.nombre}</span>
-                      {ev.es_actual && (
-                        <span className="shrink-0 rounded-full bg-flame/15 px-2 py-0.5 text-[10px] font-semibold text-flame">Actual</span>
-                      )}
-                      <span className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold ${ev.abierto ? 'bg-[#007334]/10 text-[#007334]' : 'bg-ink/10 text-ink/50'}`}>
-                        {ev.abierto ? 'Abierto' : 'Cerrado'}
-                      </span>
-                    </p>
-                    <p className="mt-0.5 text-xs text-ink/50">
-                      Evento: {formatearFecha(ev.fecha_inicio)} al {formatearFecha(ev.fecha_fin)}
-                    </p>
-                    <p className="text-xs text-ink/50">
-                      Inscripciones hasta el {formatearFecha(ev.fecha_limite_registro)} · {formatearHora12(ev.hora_limite_registro)}
-                    </p>
-                  </div>
-
-                  {conteo && (
-                    <div className="flex gap-4 text-xs text-ink/60">
-                      <span><strong className="font-display text-ink">{conteo.total}</strong> inscritos</span>
-                      <span><strong className="font-display text-ink">{conteo.confirmados}</strong> confirmados</span>
+          <>
+          {aniosDisponibles.length > 0 && (
+            <div className="mt-4 flex flex-wrap items-center gap-3">
+              <span className="text-sm font-semibold text-ink/60">Año</span>
+              <div className="relative">
+                <button
+                  onClick={() => setMenuAnio((m) => !m)}
+                  className={`inline-flex items-center gap-2 rounded-full border bg-white px-4 py-1.5 text-sm font-semibold text-night-2 shadow-sm transition ${menuAnio ? 'border-night-2 ring-2 ring-night-2/20' : 'border-night-2/50 hover:border-night-2'}`}
+                >
+                  {anioActivo}
+                  <span className="text-xs font-normal opacity-75">· {conteoPorAnio[anioActivo]} {conteoPorAnio[anioActivo] === 1 ? 'evento' : 'eventos'}</span>
+                  <span className="text-xs">▾</span>
+                </button>
+                {menuAnio && (
+                  <>
+                    <div className="fixed inset-0 z-10" onClick={() => setMenuAnio(false)} />
+                    <div className="absolute left-0 top-full z-20 mt-2 max-h-64 w-56 overflow-y-auto rounded-xl border border-ink/10 bg-white p-1.5 shadow-lg">
+                      {aniosDisponibles.map((a) => (
+                        <button
+                          key={a}
+                          onClick={() => { setAnioFiltro(a); setMenuAnio(false); }}
+                          className={`flex w-full items-center justify-between rounded-lg px-3 py-2 text-left text-sm transition ${a === anioActivo ? 'bg-night-2/10 font-semibold text-night-2' : 'text-ink/80 hover:bg-ink/5'}`}
+                        >
+                          <span>{a}</span>
+                          <span className="text-xs font-normal text-ink/40">{conteoPorAnio[a]} {conteoPorAnio[a] === 1 ? 'evento' : 'eventos'}</span>
+                        </button>
+                      ))}
                     </div>
-                  )}
-
-                  {cuenta && (
-                    <div className="flex gap-1">
-                      <CajaTiempo valor={cuenta.dias} etiqueta="Días" />
-                      <CajaTiempo valor={cuenta.horas} etiqueta="Hrs" />
-                      <CajaTiempo valor={cuenta.minutos} etiqueta="Min" />
-                    </div>
-                  )}
-
-                  <div className="ml-auto flex shrink-0 gap-2">
-                    <button
-                      onClick={() => abrirEditar(ev)}
-                      disabled={!modoEdicion}
-                      className="rounded-full bg-[#007334]/10 px-3 py-1 text-xs font-semibold text-[#007334] hover:bg-[#007334]/20 disabled:cursor-not-allowed disabled:opacity-40"
-                    >
-                      Editar
-                    </button>
-                    {rol === 'super_admin' && (
-                      <button
-                        onClick={() => eliminar(ev.id, ev.nombre)}
-                        disabled={!modoEdicion}
-                        className="rounded-full bg-ember/10 px-3 py-1 text-xs font-semibold text-ember hover:bg-ember/20 disabled:cursor-not-allowed disabled:opacity-40"
-                      >
-                        Eliminar
-                      </button>
-                    )}
-                  </div>
-                </div>
-              );
-            })}
+                  </>
+                )}
+              </div>
+              <span className="ml-auto text-xs text-ink/50">
+                Mostrando {eventosVisibles.length} {eventosVisibles.length === 1 ? 'evento' : 'eventos'} de {anioActivo}
+              </span>
+            </div>
+          )}
+          <div className="mt-3 overflow-x-auto rounded-xl border border-ink/10 bg-white shadow-sm">
+            {eventos.length === 0 && <p className="p-4 text-sm text-ink/40">Sin eventos registrados todavía.</p>}
+            {eventos.length > 0 && (
+              <table className="w-full min-w-[860px] border-collapse text-sm">
+                <thead>
+                  <tr className="bg-night text-left text-[11px] font-semibold uppercase tracking-wide text-white">
+                    <th className="px-4 py-3 text-center">Evento</th>
+                    <th className="px-4 py-3 text-center">Estado</th>
+                    <th className="px-4 py-3 text-center">Fechas del evento</th>
+                    <th className="px-4 py-3 text-center">Inscripción hasta</th>
+                    <th className="px-4 py-3 text-center">Inscritos</th>
+                    <th className="px-4 py-3 text-center">Confirmados</th>
+                    <th className="px-4 py-3 text-center">Faltan</th>
+                    <th className="px-4 py-3 text-center">Acciones</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {eventosVisibles.map((ev) => {
+                    const cuenta = ev.abierto ? calcularCuentaRegresiva(ev.fecha_limite_registro.slice(0, 10), ev.hora_limite_registro) : null;
+                    const conteo = conteos[ev.id];
+                    return (
+                      <tr key={ev.id} className={`border-t border-ink/10 ${ev.abierto ? '' : 'bg-ink/[0.02] text-ink/60'}`}>
+                        <td className="px-4 py-3 text-center font-semibold text-ink">{ev.nombre}</td>
+                        <td className="px-4 py-3 text-center">
+                          <span className="flex flex-wrap justify-center gap-1">
+                            {ev.es_actual && (
+                              <span className="shrink-0 rounded-full bg-flame/15 px-2 py-0.5 text-[10px] font-semibold text-flame">Actual</span>
+                            )}
+                            <span className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold ${ev.abierto ? 'bg-[#007334]/10 text-[#007334]' : 'bg-ink/10 text-ink/50'}`}>
+                              {ev.abierto ? 'Abierto' : 'Cerrado'}
+                            </span>
+                          </span>
+                        </td>
+                        <td className="px-4 py-3 text-center text-ink/70">{formatearFecha(ev.fecha_inicio)} al {formatearFecha(ev.fecha_fin)}</td>
+                        <td className="px-4 py-3 text-center text-ink/70">{formatearFecha(ev.fecha_limite_registro)} · {formatearHora12(ev.hora_limite_registro)}</td>
+                        <td className="px-4 py-3 text-center font-display font-bold text-ink">{conteo ? conteo.total : '—'}</td>
+                        <td className="px-4 py-3 text-center font-display font-bold text-ink">{conteo ? conteo.confirmados : '—'}</td>
+                        <td className="px-4 py-3 text-center">
+                          {cuenta ? (
+                            <div className="flex justify-center gap-1">
+                              <CajaTiempo valor={cuenta.dias} etiqueta="Días" />
+                              <CajaTiempo valor={cuenta.horas} etiqueta="Hrs" />
+                              <CajaTiempo valor={cuenta.minutos} etiqueta="Min" />
+                            </div>
+                          ) : <span className="text-ink/30">—</span>}
+                        </td>
+                        <td className="px-4 py-3 text-center">
+                          <div className="flex justify-center gap-2">
+                            <button
+                              onClick={() => abrirEditar(ev)}
+                              disabled={!modoEdicion}
+                              className="rounded-full border border-night-2/40 bg-night-2/10 px-3 py-1 text-xs font-semibold text-night-2 transition hover:bg-night-2/20 disabled:cursor-not-allowed disabled:opacity-50"
+                            >
+                              Editar
+                            </button>
+                            {rol === 'super_admin' && (
+                              <button
+                                onClick={() => eliminar(ev.id, ev.nombre)}
+                                disabled={!modoEdicion}
+                                className="rounded-full border border-ember/40 bg-ember/10 px-3 py-1 text-xs font-semibold text-ember transition hover:bg-ember hover:text-white disabled:cursor-not-allowed disabled:opacity-50"
+                              >
+                                Eliminar
+                              </button>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            )}
           </div>
+          </>
         )
       )}
 

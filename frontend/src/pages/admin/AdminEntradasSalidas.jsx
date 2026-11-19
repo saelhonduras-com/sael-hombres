@@ -216,7 +216,7 @@ export default function AdminEntradasSalidas() {
       {error && <p className="mt-4 rounded-lg bg-ember/10 p-3 text-sm text-ember">{error}</p>}
 
       {eventoActual && (
-        <div className="mt-4 flex flex-wrap gap-2">
+        <div className="mt-4 flex overflow-x-auto border-b border-ink/15">
           {[
             { id: 'boleteria', label: 'Boletería', color: '#FDC41F', textDark: true },
             { id: 'entradas', label: 'Entradas de Efectivo', color: '#007334' },
@@ -229,12 +229,12 @@ export default function AdminEntradasSalidas() {
               <button
                 key={t.id}
                 onClick={() => setSeccion(t.id)}
-                style={activo ? { backgroundColor: t.color } : {}}
-                className={`rounded-full px-4 py-1.5 text-xs font-semibold transition ${
-                  activo ? (t.textDark ? 'text-night' : 'text-white') : 'border border-ink/15 text-ink/70 hover:bg-ink/5'
+                style={activo ? { borderBottomColor: t.color, color: t.textDark ? '#1F3464' : t.color } : {}}
+                className={`-mb-px flex shrink-0 items-center gap-2 whitespace-nowrap border-b-[3px] px-4 py-2.5 text-sm font-semibold transition ${
+                  activo ? '' : 'border-transparent text-ink/50 hover:text-ink/80'
                 }`}
               >
-                {!activo && <span className="mr-1.5 inline-block h-2 w-2 rounded-full align-middle" style={{ backgroundColor: t.color }} />}
+                <span className="inline-block h-2 w-2 rounded-full" style={{ backgroundColor: t.color }} />
                 {t.label}
               </button>
             );

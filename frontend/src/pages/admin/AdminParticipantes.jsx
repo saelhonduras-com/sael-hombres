@@ -4,7 +4,7 @@ import api, { mensajeError } from '../../api';
 import {
   DEPARTAMENTOS_HONDURAS,
   MUNICIPIOS_POR_DEPARTAMENTO,
-  ZONAS_FIHNEC,
+  ZONAS_FIHNEC, nombreZona,
   ZONAS_POR_DEPARTAMENTO,
   CARGOS_FIHNEC,
   ESTADOS_CIVILES,
@@ -18,7 +18,6 @@ const TIPOS_PARTICIPANTE = [
   { value: 'menor', label: 'Menor' },
 ];
 
-const LIMITE = 30;
 
 const filtrosVacios = { buscar: '', departamento: '', zona: '', tipo_participante: '' };
 
@@ -56,23 +55,10 @@ function fechaDMA(fechaISO) {
 const claseInput = 'w-full rounded-lg border border-ink/15 px-3 py-2 text-sm focus:border-ember focus:outline-none';
 const claseFiltro = 'w-48 rounded-lg border border-ink/15 px-3 py-1.5 text-xs focus:border-ember focus:outline-none';
 
-const COLORES_TAB = {
-  celeste: {
-    on: 'bg-night-2 text-white border border-night-2',
-    off: 'border border-night-2/40 bg-night-2/10 text-night-2 hover:bg-night-2/20',
-  },
-  azul: {
-    on: 'bg-night text-white border border-night',
-    off: 'border border-night/40 bg-night/10 text-night hover:bg-night/20',
-  },
-  oro: {
-    on: 'bg-gold text-night border border-gold',
-    off: 'border border-gold bg-gold/25 text-night hover:bg-gold/45',
-  },
-};
-
-function claseTab(activa, color = 'azul') {
-  return `rounded-full px-4 py-2 text-sm font-semibold transition ${COLORES_TAB[color][activa ? 'on' : 'off']}`;
+// Pestañas tipo control segmentado (cápsula con la activa rellena).
+const segContenedor = 'inline-flex flex-wrap gap-0.5 rounded-xl border border-night/15 bg-white p-1';
+function claseSeg(activa) {
+  return `rounded-lg px-4 py-2 text-sm font-semibold transition ${activa ? 'bg-night text-white shadow-sm' : 'text-night/60 hover:bg-night/5 hover:text-night'}`;
 }
 
 // Muestra siempre el tipo y el número: "DNI: …", "Pasaporte: …" o "Código interno: …".
@@ -96,18 +82,21 @@ export default function AdminParticipantes() {
     setConfirmacion({ mensaje, textoConfirmar, onConfirmar });
   }
 
-  // --- "Todos los participantes" (tabla completa, scroll infinito) ---
+  // --- "Todos los participantes" (tabla completa, por páginas de 10 / 25 / 50 / 100) ---
   const [participantes, setParticipantes] = useState([]);
   const [total, setTotal] = useState(0);
   const [pagina, setPagina] = useState(1);
   const [cargando, setCargando] = useState(true);
-  const [cargandoMas, setCargandoMas] = useState(false);
+  const [cargandoMas, setCargandoMas] = useState(false); // cambio de página: la tabla se queda y se atenúa
+  const [porPaginaTodos, setPorPaginaTodos] = useState(25);
+  const [limiteCargado, setLimiteCargado] = useState(25); // tamaño de página de lo que se ve en pantalla ahora
+  const porPaginaTodosRef = useRef(25);
+  const paginaRef = useRef(1);
+  const [totalesTodos, setTotalesTodos] = useState(null); // { total, nacionales, extranjeros, menores } — generales, sin filtros
 
   const [filtros, setFiltros] = useState(filtrosVacios);
   const filtrosRef = useRef(filtros);
   useEffect(() => { filtrosRef.current = filtros; }, [filtros]);
-
-  const sentinelRef = useRef(null);
 
   // --- "Inscribiéndose ahora" (evento actual, checkbox en línea) ---
   const [modoLista, setModoLista] = useState('actual'); // 'actual' | 'cumple' | 'todos'
@@ -146,19 +135,26 @@ export default function AdminParticipantes() {
   const [error, setError] = useState('');
 
   // --- Carga de "Todos los participantes" ---
-  async function cargarParticipantes(filtrosActuales, paginaCarga, reemplazar) {
-    if (reemplazar) setCargando(true); else setCargandoMas(true);
+  async function cargarParticipantes(filtrosActuales, paginaCarga, reemplazar, silencioso = false) {
+    if (!silencioso) { if (reemplazar) setCargando(true); else setCargandoMas(true); }
     setError('');
     try {
-      const params = { pagina: paginaCarga, limite: LIMITE };
+      const params = { pagina: paginaCarga, limite: porPaginaTodosRef.current };
       if (filtrosActuales.buscar) params.buscar = filtrosActuales.buscar;
       if (filtrosActuales.departamento) params.departamento = filtrosActuales.departamento;
       if (filtrosActuales.zona) params.zona = filtrosActuales.zona;
       if (filtrosActuales.tipo_participante) params.tipo_participante = filtrosActuales.tipo_participante;
       const { data } = await api.get('/admin/participantes', { params });
-      setParticipantes((prev) => (reemplazar ? data.participantes : [...prev, ...data.participantes]));
+      // Si la página pedida ya no existe (por ejemplo, se eliminó gente y
+      // quedó una página menos), pasa a la última que sí existe.
+      const ultima = Math.max(1, Math.ceil(data.total / porPaginaTodosRef.current));
+      if (paginaCarga > ultima) return await cargarParticipantes(filtrosActuales, ultima, reemplazar, silencioso);
+      setParticipantes(data.participantes);
       setTotal(data.total);
+      if (data.totales) setTotalesTodos(data.totales);
       setPagina(paginaCarga);
+      setLimiteCargado(data.limite || porPaginaTodosRef.current);
+      paginaRef.current = paginaCarga;
     } catch (err) {
       setError(mensajeError(err));
     } finally {
@@ -182,19 +178,6 @@ export default function AdminParticipantes() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [filtros.buscar]);
 
-  useEffect(() => {
-    if (vista !== 'lista' || modoLista !== 'todos') return;
-    const el = sentinelRef.current;
-    if (!el) return;
-    const obs = new IntersectionObserver((entries) => {
-      if (entries[0].isIntersecting && !cargando && !cargandoMas && participantes.length < total) {
-        cargarParticipantes(filtrosRef.current, pagina + 1, false);
-      }
-    }, { rootMargin: '250px' });
-    obs.observe(el);
-    return () => obs.disconnect();
-  }, [vista, modoLista, cargando, cargandoMas, participantes.length, total, pagina]);
-
   function buscar(e) {
     e.preventDefault();
     cargarParticipantes(filtros, 1, true);
@@ -212,7 +195,7 @@ export default function AdminParticipantes() {
     } else if (modoLista === 'cumple') {
       cargarInscripcionesEventoActual('');
     } else {
-      cargarParticipantes(filtrosRef.current, 1, true);
+      cargarParticipantes(filtrosRef.current, paginaRef.current, false, true);
     }
     api.get('/admin/participantes/estadisticas', eventoActual ? { params: { evento_id: eventoActual.id } } : undefined).then(({ data }) => setEstadisticas(data)).catch(() => {});
   }
@@ -457,8 +440,7 @@ export default function AdminParticipantes() {
         setError('');
         try {
           await api.put(`/admin/participantes/${id}/ocultar`);
-          setParticipantes((prev) => prev.filter((p) => p.id !== id));
-          setTotal((prev) => Math.max(prev - 1, 0));
+          cargarParticipantes(filtrosRef.current, paginaRef.current, false);
           api.get('/admin/participantes/estadisticas', eventoActual ? { params: { evento_id: eventoActual.id } } : undefined).then(({ data }) => setEstadisticas(data)).catch(() => {});
           if (seleccionado?.id === id) {
             setSeleccionado(null);
@@ -705,14 +687,14 @@ export default function AdminParticipantes() {
         <div className="mt-4">
           <div>
             <div className="flex flex-wrap items-center justify-between gap-2">
-              <div className="flex flex-wrap gap-2">
-                <button onClick={() => setModoLista('actual')} className={claseTab(modoLista === 'actual', 'celeste')}>
+              <div className={segContenedor}>
+                <button onClick={() => setModoLista('actual')} className={claseSeg(modoLista === 'actual')}>
                   ★ Inscribiéndose ahora
                 </button>
-                <button onClick={() => setModoLista('todos')} className={claseTab(modoLista === 'todos', 'azul')}>
+                <button onClick={() => setModoLista('todos')} className={claseSeg(modoLista === 'todos')}>
                   Todos los participantes
                 </button>
-                <button onClick={() => setModoLista('cumple')} className={claseTab(modoLista === 'cumple', 'oro')}>
+                <button onClick={() => setModoLista('cumple')} className={claseSeg(modoLista === 'cumple')}>
                   🎂 Cumpleañeros ({cumpleaneros.length})
                 </button>
               </div>
@@ -793,7 +775,7 @@ export default function AdminParticipantes() {
                               <th className="px-4 py-3">Zona</th>
                               <th className="px-4 py-3">Procedencia</th>
                               <th className="px-4 py-3 text-center">Registrado</th>
-                              <th className="px-4 py-3"></th>
+                              <th className="px-4 py-3 text-right">Acciones</th>
                             </tr>
                           </thead>
                           <tbody>
@@ -859,7 +841,7 @@ export default function AdminParticipantes() {
                                   onChange={(e) => { setPorPaginaActual(Number(e.target.value)); setPaginaActual(1); }}
                                   className="rounded-lg border border-ink/20 bg-white px-2 py-1 text-sm"
                                 >
-                                  {[25, 50, 100].map((n) => <option key={n} value={n}>{n}</option>)}
+                                  {[10, 25, 50, 100].map((n) => <option key={n} value={n}>{n}</option>)}
                                 </select>
                               </label>
                               <button
@@ -979,13 +961,30 @@ export default function AdminParticipantes() {
             {modoLista === 'todos' && (
               <div>
                 <form onSubmit={buscar} className="mt-4 rounded-2xl border border-ink/10 bg-white p-3 shadow-sm">
-                  <input
-                    type="text"
-                    value={filtros.buscar}
-                    onChange={(e) => setFiltros((f) => ({ ...f, buscar: e.target.value }))}
-                    placeholder="Buscar por nombre o identificación"
-                    className={`${claseInput} w-full py-1.5`}
-                  />
+                  <div className="flex flex-wrap items-center gap-3">
+                    <input
+                      type="text"
+                      value={filtros.buscar}
+                      onChange={(e) => setFiltros((f) => ({ ...f, buscar: e.target.value }))}
+                      placeholder="Buscar por nombre o identificación"
+                      className={`${claseInput} min-w-[220px] flex-1 py-1.5`}
+                    />
+                    {totalesTodos && (
+                      <div className="flex shrink-0 items-stretch overflow-hidden rounded-xl bg-night text-white" title="Totales generales: no cambian con la búsqueda ni los filtros">
+                        {[
+                          { n: totalesTodos.total, t: 'Total', fuerte: true },
+                          { n: totalesTodos.nacionales, t: 'Nacionales' },
+                          { n: totalesTodos.extranjeros, t: 'Extranjeros' },
+                          { n: totalesTodos.menores, t: 'Menores' },
+                        ].map((c) => (
+                          <div key={c.t} className={`border-l border-white/20 px-4 py-1 text-center first:border-l-0 ${c.fuerte ? 'bg-white/10 px-5' : ''}`}>
+                            <p className="font-display text-lg font-bold leading-tight">{c.n}</p>
+                            <p className="text-[10px] font-semibold uppercase tracking-wide text-white/80">{c.t}</p>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
                   <div className="mt-2 flex flex-wrap items-center gap-2">
                     <select value={filtros.departamento} onChange={(e) => setFiltros((f) => ({ ...f, departamento: e.target.value }))} className={claseFiltro}>
                       <option value="">Todos los departamentos</option>
@@ -993,7 +992,7 @@ export default function AdminParticipantes() {
                     </select>
                     <select value={filtros.zona} onChange={(e) => setFiltros((f) => ({ ...f, zona: e.target.value }))} className={claseFiltro}>
                       <option value="">Todas las zonas</option>
-                      {ZONAS_FIHNEC.map((z) => <option key={z} value={z}>{z}</option>)}
+                      {ZONAS_FIHNEC.map((z) => <option key={z} value={z}>{nombreZona(z)}</option>)}
                     </select>
                     <select value={filtros.tipo_participante} onChange={(e) => setFiltros((f) => ({ ...f, tipo_participante: e.target.value }))} className={claseFiltro}>
                       {TIPOS_PARTICIPANTE.map((t) => <option key={t.value} value={t.value}>{t.label}</option>)}
@@ -1008,7 +1007,7 @@ export default function AdminParticipantes() {
                 </form>
 
                 {cargando ? <p className="mt-6 text-ink/40">Cargando…</p> : (
-                  <div className="mt-4 overflow-x-auto rounded-2xl border border-ink/10 bg-white shadow-sm">
+                  <div className={`mt-4 overflow-x-auto rounded-2xl border border-ink/10 bg-white shadow-sm transition-opacity ${cargandoMas ? 'opacity-60' : ''}`}>
                     <table className="w-full text-sm">
                       <thead>
                         <tr className="border-b border-ink/10 bg-[#1F3464]/12 text-left text-xs uppercase tracking-wide text-[#1F3464]">
@@ -1018,7 +1017,7 @@ export default function AdminParticipantes() {
                           <th className="px-4 py-3">Capítulo</th>
                           <th className="px-4 py-3">Zona</th>
                           <th className="px-4 py-3">Procedencia</th>
-                          <th className="px-4 py-3"></th>
+                          <th className="px-4 py-3 text-right">Acciones</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -1054,13 +1053,48 @@ export default function AdminParticipantes() {
                         ))}
                       </tbody>
                     </table>
-                    {participantes.length > 0 && (
-                      <p className="px-4 py-2 text-center text-xs text-ink/30">
-                        Mostrando {participantes.length} de {total}
-                      </p>
-                    )}
-                    <div ref={sentinelRef} />
-                    {cargandoMas && <p className="pb-2 text-center text-xs text-ink/40">Cargando más…</p>}
+                    {participantes.length > 0 && (() => {
+                      const totalPaginasTodos = Math.max(1, Math.ceil(total / limiteCargado));
+                      return (
+                        <div className="flex flex-wrap items-center justify-between gap-3 border-t border-ink/10 px-4 py-3 text-sm text-ink/70">
+                          <p>
+                            Mostrando {(pagina - 1) * limiteCargado + 1}–{Math.min(pagina * limiteCargado, total)} de {total}
+                          </p>
+                          <div className="flex flex-wrap items-center gap-2">
+                            <label className="flex items-center gap-1 text-xs">
+                              Por página
+                              <select
+                                value={porPaginaTodos}
+                                onChange={(e) => {
+                                  const n = Number(e.target.value);
+                                  setPorPaginaTodos(n);
+                                  porPaginaTodosRef.current = n;
+                                  cargarParticipantes(filtrosRef.current, 1, false);
+                                }}
+                                className="rounded-lg border border-ink/20 bg-white px-2 py-1 text-sm"
+                              >
+                                {[10, 25, 50, 100].map((n) => <option key={n} value={n}>{n}</option>)}
+                              </select>
+                            </label>
+                            <button
+                              onClick={() => cargarParticipantes(filtrosRef.current, Math.max(1, pagina - 1), false)}
+                              disabled={pagina <= 1 || cargandoMas}
+                              className="rounded-full border border-ink/20 px-3 py-1 font-semibold hover:bg-ink/5 disabled:opacity-40"
+                            >
+                              ← Anterior
+                            </button>
+                            <span className="text-xs">Página {pagina} de {totalPaginasTodos}</span>
+                            <button
+                              onClick={() => cargarParticipantes(filtrosRef.current, Math.min(totalPaginasTodos, pagina + 1), false)}
+                              disabled={pagina >= totalPaginasTodos || cargandoMas}
+                              className="rounded-full border border-ink/20 px-3 py-1 font-semibold hover:bg-ink/5 disabled:opacity-40"
+                            >
+                              Siguiente →
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })()}
                   </div>
                 )}
               </div>
@@ -1168,7 +1202,7 @@ export default function AdminParticipantes() {
               <span className="mb-1 block text-xs font-semibold text-ink/60">Zona</span>
               <select value={formEditar.zona} onChange={(e) => setFormEditar((f) => ({ ...f, zona: e.target.value }))} disabled={!formEditar.departamento} className={`${claseInput} disabled:bg-ink/5`}>
                 <option value="">{formEditar.departamento ? 'Seleccionar…' : 'Primero elige un departamento'}</option>
-                {zonasDeDepartamento(formEditar.departamento, formEditar.zona).map((z) => <option key={z} value={z}>{z}</option>)}
+                {zonasDeDepartamento(formEditar.departamento, formEditar.zona).map((z) => <option key={z} value={z}>{nombreZona(z)}</option>)}
               </select>
             </label>
             <label>
@@ -1275,7 +1309,7 @@ export default function AdminParticipantes() {
               <span className="mb-1 block text-xs font-semibold text-ink/60">Zona</span>
               <select value={formExtranjero.zona} onChange={(e) => setFormExtranjero((f) => ({ ...f, zona: e.target.value }))} disabled={!formExtranjero.departamento} className={`${claseInput} disabled:bg-ink/5`}>
                 <option value="">{formExtranjero.departamento ? 'Seleccionar…' : 'Primero elige un departamento'}</option>
-                {zonasDeDepartamento(formExtranjero.departamento, formExtranjero.zona).map((z) => <option key={z} value={z}>{z}</option>)}
+                {zonasDeDepartamento(formExtranjero.departamento, formExtranjero.zona).map((z) => <option key={z} value={z}>{nombreZona(z)}</option>)}
               </select>
             </label>
             <label>
@@ -1393,7 +1427,7 @@ export default function AdminParticipantes() {
               <span className="mb-1 block text-xs font-semibold text-ink/60">Zona</span>
               <select value={formMenor.zona} onChange={(e) => setFormMenor((f) => ({ ...f, zona: e.target.value }))} disabled={!formMenor.departamento} className={`${claseInput} disabled:bg-ink/5`}>
                 <option value="">{formMenor.departamento ? 'Seleccionar…' : 'Primero elige un departamento'}</option>
-                {zonasDeDepartamento(formMenor.departamento, formMenor.zona).map((z) => <option key={z} value={z}>{z}</option>)}
+                {zonasDeDepartamento(formMenor.departamento, formMenor.zona).map((z) => <option key={z} value={z}>{nombreZona(z)}</option>)}
               </select>
             </label>
           </div>

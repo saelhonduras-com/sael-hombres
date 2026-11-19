@@ -2,12 +2,25 @@ import { useEffect, useState } from 'react';
 import { useOutletContext } from 'react-router-dom';
 import api, { mensajeError } from '../../api';
 import {
-  DEPARTAMENTOS_HONDURAS, MUNICIPIOS_POR_DEPARTAMENTO, ZONAS_FIHNEC,
+  DEPARTAMENTOS_HONDURAS, MUNICIPIOS_POR_DEPARTAMENTO, ZONAS_FIHNEC, nombreZona,
   CARGOS_FIHNEC, CARGOS_HISTORICO, ESTADOS_CIVILES,
   TIPOS_TESTIMONIO, FORMACION_OFICIAL, OTRAS_PARTICIPACIONES,
 } from '../../listas';
 
+// "1985-03-15" → "15/03/1985"
+function fechaDMA(fechaISO) {
+  if (!fechaISO) return '—';
+  const [a, m, d] = fechaISO.slice(0, 10).split('-');
+  return `${d}/${m}/${a}`;
+}
+
 const claseInput = 'w-full rounded-lg border border-ink/15 px-3 py-2 text-sm focus:border-ember focus:outline-none';
+
+// Pestañas tipo control segmentado (cápsula con la activa rellena).
+const segContenedor = 'inline-flex flex-wrap gap-0.5 rounded-xl border border-night/15 bg-white p-1';
+function claseSeg(activa) {
+  return `rounded-lg px-4 py-2 text-sm font-semibold transition ${activa ? 'bg-night text-white shadow-sm' : 'text-night/60 hover:bg-night/5 hover:text-night'}`;
+}
 const claseFiltro = 'w-48 rounded-lg border border-ink/15 px-3 py-1.5 text-xs focus:border-ember focus:outline-none';
 const btnVer = 'rounded-full border border-ink/20 px-3 py-1 text-xs font-semibold text-ink/70 hover:bg-ink/5';
 const btnEditar = 'rounded-full bg-[#007334] px-3 py-1 text-xs font-semibold text-white hover:bg-[#005c29]';
@@ -409,18 +422,18 @@ export default function AdminSaelistas() {
           autoservicio en la misma línea — el enlace SIEMPRE está visible,
           sin importar en qué vista esté el admin. */}
       <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
-        <div className="flex gap-2">
+        <div className={(vista === 'lista' || vista === 'asistencia') ? segContenedor : 'flex gap-2'}>
           {(vista === 'lista' || vista === 'asistencia') && (
             <>
               <button
                 onClick={() => setVista('lista')}
-                className={`rounded-full px-4 py-1.5 text-xs font-semibold ${vista === 'lista' ? 'bg-ink text-white' : 'border border-ink/20 text-ink/70 hover:bg-ink/5'}`}
+                className={claseSeg(vista === 'lista')}
               >
                 Servidores
               </button>
               <button
                 onClick={() => setVista('asistencia')}
-                className={`rounded-full px-4 py-1.5 text-xs font-semibold ${vista === 'asistencia' ? 'bg-ink text-white' : 'border border-ink/20 text-ink/70 hover:bg-ink/5'}`}
+                className={claseSeg(vista === 'asistencia')}
               >
                 ★ Asistencia al evento
               </button>
@@ -454,20 +467,9 @@ export default function AdminSaelistas() {
           {!eventoActual && <p className="text-sm text-ink/40">No hay un evento SAEL marcado como actual/abierto en este momento.</p>}
           {eventoActual && (
             <>
-              <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-ink/10 bg-[#1F3464]/10 px-4 py-3 shadow-sm">
-                <div>
-                  <p className="text-xs font-semibold uppercase tracking-wide text-[#1F3464]">Evento actual</p>
-                  <p className="font-display text-lg font-bold text-[#1F3464]">{eventoActual.nombre}</p>
-                </div>
-                <p className="text-sm text-[#1F3464]">
-                  <span className="font-display text-2xl font-bold">{totalesAsistencia.total_registrados}</span>
-                  <span className="font-semibold"> / {totalesAsistencia.total} asistieron</span>
-                </p>
-              </div>
-
               <form
                 onSubmit={(e) => { e.preventDefault(); cargarAsistencia(buscarAsistencia); }}
-                className="mt-3 flex flex-wrap items-center gap-2 rounded-2xl border border-ink/10 bg-white p-4 shadow-sm"
+                className="flex flex-wrap items-center gap-2 rounded-2xl border border-ink/10 bg-white p-3 shadow-sm"
               >
                 <input
                   type="text" value={buscarAsistencia} onChange={(e) => setBuscarAsistencia(e.target.value)}
@@ -477,10 +479,20 @@ export default function AdminSaelistas() {
                 <button
                   type="button"
                   onClick={() => { setBuscarAsistencia(''); cargarAsistencia(''); }}
-                  className="rounded-full border border-ink/20 px-5 py-2 text-sm font-semibold text-ink/70 hover:bg-ink/5"
+                  className="rounded-full border border-night-2/40 bg-night-2/10 px-5 py-2 text-sm font-semibold text-night hover:bg-night-2/20"
                 >
                   Limpiar filtros
                 </button>
+                <div className="flex min-w-[330px] items-center justify-between gap-5 rounded-xl bg-night px-5 py-2 text-white">
+                  <div>
+                    <p className="text-[10px] uppercase tracking-wide text-white/60">Evento actual</p>
+                    <p className="font-display text-base font-bold leading-tight">{eventoActual.nombre}</p>
+                  </div>
+                  <p className="border-l border-white/20 pl-3 text-sm">
+                    <span className="font-display text-xl font-bold">{totalesAsistencia.total_registrados}</span>
+                    <span className="text-white/60"> / {totalesAsistencia.total} asistieron</span>
+                  </p>
+                </div>
               </form>
 
               {cargandoAsistencia ? <p className="mt-6 text-ink/40">Cargando…</p> : (
@@ -502,7 +514,7 @@ export default function AdminSaelistas() {
                         <tr key={s.saelista_id} className="border-b border-ink/5 last:border-0">
                           <td className="px-4 py-3 font-medium text-ink">{s.nombre_completo}</td>
                           <td className="px-4 py-3 text-ink/60">{s.capitulo || '—'}</td>
-                          <td className="px-4 py-3 text-ink/60">{s.zona || '—'}</td>
+                          <td className="px-4 py-3 text-ink/60">{nombreZona(s.zona) || '—'}</td>
                           <td className="px-4 py-3 text-center">
                             <input
                               type="checkbox" checked={s.registrado_presencial}
@@ -530,14 +542,14 @@ export default function AdminSaelistas() {
             />
             <select value={zonaFiltro} onChange={(e) => setZonaFiltro(e.target.value)} className={claseFiltro}>
               <option value="">Todas las zonas</option>
-              {ZONAS_FIHNEC.map((z) => <option key={z} value={z}>{z}</option>)}
+              {ZONAS_FIHNEC.map((z) => <option key={z} value={z}>{nombreZona(z)}</option>)}
             </select>
             <select value={aspiranteFiltro} onChange={(e) => setAspiranteFiltro(e.target.value)} className={claseFiltro}>
               <option value="">Todos</option>
               <option value="true">Aspirantes</option>
             </select>
             <button type="submit" className="rounded-full bg-[#007334] px-4 py-1.5 text-xs font-semibold text-white hover:bg-[#005c29]">Buscar</button>
-            <button type="button" onClick={limpiarFiltros} className="rounded-full border border-ink/20 px-4 py-1.5 text-xs font-semibold text-ink/70 hover:bg-ink/5">Limpiar filtros</button>
+            <button type="button" onClick={limpiarFiltros} className="rounded-full border border-night-2/40 bg-night-2/10 px-4 py-1.5 text-xs font-semibold text-night hover:bg-night-2/20">Limpiar filtros</button>
           </form>
 
           {cargando ? <p className="mt-6 text-ink/40">Cargando…</p> : (
@@ -551,7 +563,7 @@ export default function AdminSaelistas() {
                     <th className="px-4 py-3">Zona</th>
                     <th className="px-4 py-3">Cargo actual</th>
                     <th className="px-4 py-3">Aspirante</th>
-                    <th className="px-4 py-3"></th>
+                    <th className="px-4 py-3 text-right">Acciones</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -563,7 +575,7 @@ export default function AdminSaelistas() {
                       <td className="px-4 py-3 font-medium text-ink">{s.nombre_completo}</td>
                       <td className="px-4 py-3 text-ink/60">{s.dni || '—'}</td>
                       <td className="px-4 py-3 text-ink/60">{s.capitulo || '—'}</td>
-                      <td className="px-4 py-3 text-ink/60">{s.zona || '—'}</td>
+                      <td className="px-4 py-3 text-ink/60">{nombreZona(s.zona) || '—'}</td>
                       <td className="px-4 py-3 text-ink/60">{s.cargo_actual || '—'}</td>
                       <td className="px-4 py-3 text-ink/60">{s.es_aspirante ? 'Sí' : ''}</td>
                       <td className="px-4 py-3 text-right whitespace-nowrap">
@@ -603,7 +615,7 @@ export default function AdminSaelistas() {
           <h3 className="mt-6 font-display text-sm font-bold text-ink">Datos personales</h3>
           <dl className="mt-2 grid gap-3 text-sm sm:grid-cols-2">
             <div><dt className="text-ink/50">DNI</dt><dd className="font-medium text-ink">{seleccionado.dni || '—'}</dd></div>
-            <div><dt className="text-ink/50">Fecha de nacimiento</dt><dd className="font-medium text-ink">{seleccionado.fecha_nacimiento ? seleccionado.fecha_nacimiento.slice(0, 10) : '—'}</dd></div>
+            <div><dt className="text-ink/50">Fecha de nacimiento</dt><dd className="font-medium text-ink">{fechaDMA(seleccionado.fecha_nacimiento)}</dd></div>
             <div><dt className="text-ink/50">Celular</dt><dd className="font-medium text-ink">{seleccionado.celular || '—'}</dd></div>
             <div><dt className="text-ink/50">Email</dt><dd className="font-medium text-ink">{seleccionado.email || '—'}</dd></div>
             <div><dt className="text-ink/50">Estado civil</dt><dd className="font-medium text-ink">{seleccionado.estado_civil || '—'}</dd></div>
@@ -616,13 +628,13 @@ export default function AdminSaelistas() {
           <h3 className="mt-6 font-display text-sm font-bold text-ink">Ubicación</h3>
           <dl className="mt-2 grid gap-3 text-sm sm:grid-cols-2">
             <div><dt className="text-ink/50">Capítulo</dt><dd className="font-medium text-ink">{seleccionado.capitulo || '—'}</dd></div>
-            <div><dt className="text-ink/50">Zona</dt><dd className="font-medium text-ink">{seleccionado.zona || '—'}</dd></div>
+            <div><dt className="text-ink/50">Zona</dt><dd className="font-medium text-ink">{nombreZona(seleccionado.zona) || '—'}</dd></div>
             <div><dt className="text-ink/50">Departamento / Municipio</dt><dd className="font-medium text-ink">{seleccionado.departamento || '—'} / {seleccionado.municipio || '—'}</dd></div>
           </dl>
 
           <h3 className="mt-6 font-display text-sm font-bold text-ink">Organizacional / FIHNEC</h3>
           <dl className="mt-2 grid gap-3 text-sm sm:grid-cols-2">
-            <div><dt className="text-ink/50">Fecha inscripción capítulo</dt><dd className="font-medium text-ink">{seleccionado.fecha_inscripcion_capitulo ? seleccionado.fecha_inscripcion_capitulo.slice(0, 10) : '—'}</dd></div>
+            <div><dt className="text-ink/50">Fecha inscripción capítulo</dt><dd className="font-medium text-ink">{fechaDMA(seleccionado.fecha_inscripcion_capitulo)}</dd></div>
             <div><dt className="text-ink/50">Tiempo en FIHNEC</dt><dd className="font-medium text-ink">{seleccionado.tiempo_fihnec || '—'}</dd></div>
             <div><dt className="text-ink/50">Cargo actual</dt><dd className="font-medium text-ink">{seleccionado.cargo_actual || '—'}</dd></div>
           </dl>
@@ -722,7 +734,7 @@ export default function AdminSaelistas() {
               <span className="mb-1 block text-xs font-semibold text-ink/60">Zona</span>
               <select value={form.zona} onChange={(e) => setForm((f) => ({ ...f, zona: e.target.value }))} className={claseInput}>
                 <option value="">Seleccionar…</option>
-                {ZONAS_FIHNEC.map((z) => <option key={z} value={z}>{z}</option>)}
+                {ZONAS_FIHNEC.map((z) => <option key={z} value={z}>{nombreZona(z)}</option>)}
               </select>
             </label>
             <label>

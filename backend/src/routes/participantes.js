@@ -371,9 +371,28 @@ router.get('/admin/participantes', requireAuth, requireModulo('participantes', '
        LIMIT $${valores.length + 1} OFFSET $${valores.length + 2}`,
       [...valores, limite, offset]
     );
+    // Totales GENERALES de "Todos los participantes" (no cambian con los
+    // filtros ni con la búsqueda): mismo criterio de la lista — visibles y
+    // con al menos una confirmación presencial en su historia.
+    const generales = await pool.query(
+      `SELECT COUNT(*) AS total,
+              COUNT(*) FILTER (WHERE tipo_participante = 'nacional') AS nacionales,
+              COUNT(*) FILTER (WHERE tipo_participante = 'extranjero') AS extranjeros,
+              COUNT(*) FILTER (WHERE tipo_participante = 'menor') AS menores
+       FROM participantes
+       WHERE oculto = false
+         AND EXISTS (SELECT 1 FROM inscripciones i WHERE i.participante_id = participantes.id AND i.registrado_presencial = true)`
+    );
+    const g = generales.rows[0];
     res.json({
       participantes: rows,
       total: parseInt(total.rows[0].count, 10),
+      totales: {
+        total: parseInt(g.total, 10),
+        nacionales: parseInt(g.nacionales, 10),
+        extranjeros: parseInt(g.extranjeros, 10),
+        menores: parseInt(g.menores, 10),
+      },
       pagina,
       limite,
     });
@@ -1231,6 +1250,13 @@ async function obtenerFilasDiplomas(evento_id) {
   }));
   const total_primera_vez = conPrimeraVez.filter((r) => r.total_saeles === 1).length;
 
+  // Cortesía = inscripción confirmada con monto de alimentación en 0 (mismo
+  // criterio que Control de Ingresos). Sin monto registrado (null) no cuenta.
+  conPrimeraVez.forEach((r) => {
+    r.cortesia = r.alimentacion_monto !== null && r.alimentacion_monto !== undefined && Number(r.alimentacion_monto) === 0;
+  });
+  const total_cortesia = conPrimeraVez.filter((r) => r.cortesia).length;
+
   // Totales por método de pago — suma de alimentacion_monto agrupado por
   // metodo_pago, para las 3 columnas nuevas (Efectivo / Transferencia
   // Bancaria / Tarjeta) que se muestran en pantalla, Excel y PDF.
@@ -1241,7 +1267,7 @@ async function obtenerFilasDiplomas(evento_id) {
     }
   });
 
-  return { rows: conPrimeraVez, total: conPrimeraVez.length, total_primera_vez, totalesPago };
+  return { rows: conPrimeraVez, total: conPrimeraVez.length, total_primera_vez, total_cortesia, totalesPago };
 }
 
 // Admin: lista para mostrar en pantalla (tabla + totales)
@@ -1252,7 +1278,7 @@ router.get('/admin/eventos/:evento_id/diplomas', requireAuth, requireModulo('dip
     if (evento.rows.length === 0) {
       return res.status(404).json({ error: 'El evento no existe.' });
     }
-    const { rows, total, total_primera_vez, totalesPago } = await obtenerFilasDiplomas(evento_id);
+    const { rows, total, total_primera_vez, total_cortesia, totalesPago } = await obtenerFilasDiplomas(evento_id);
     res.json({
       evento_nombre: evento.rows[0].nombre,
       filas: rows.map((r, i) => ({
@@ -1264,9 +1290,11 @@ router.get('/admin/eventos/:evento_id/diplomas', requireAuth, requireModulo('dip
         primera_vez: r.total_saeles === 1,
         metodo_pago: r.metodo_pago,
         alimentacion_monto: r.alimentacion_monto,
+        cortesia: r.cortesia,
       })),
       total,
       total_primera_vez,
+      total_cortesia,
       totalesPago,
     });
   } catch (err) {
@@ -1282,7 +1310,7 @@ router.get('/admin/eventos/:evento_id/diplomas/excel', requireAuth, requireModul
     if (evento.rows.length === 0) {
       return res.status(404).json({ error: 'El evento no existe.' });
     }
-    const { rows, total, total_primera_vez, totalesPago } = await obtenerFilasDiplomas(evento_id);
+    const { rows, total, total_primera_vez, total_cortesia, totalesPago } = await obtenerFilasDiplomas(evento_id);
 
     const datos = rows.map((r, i) => ({
       '#': i + 1,
@@ -1291,9 +1319,10 @@ router.get('/admin/eventos/:evento_id/diplomas/excel', requireAuth, requireModul
       PROCEDENCIA: r.procedencia,
       NOMBRE: r.nombre_completo,
       '1ER SAEL': r.total_saeles === 1 ? '1' : '',
-      Efectivo: r.metodo_pago === 'efectivo' && r.alimentacion_monto ? Number(r.alimentacion_monto) : '',
-      'Transferencia Bancaria': r.metodo_pago === 'transferencia' && r.alimentacion_monto ? Number(r.alimentacion_monto) : '',
-      'Tarjeta credito/debito': r.metodo_pago === 'tarjeta' && r.alimentacion_monto ? Number(r.alimentacion_monto) : '',
+      Efectivo: r.metodo_pago === 'efectivo' && Number(r.alimentacion_monto) > 0 ? Number(r.alimentacion_monto) : '',
+      'Transferencia Bancaria': r.metodo_pago === 'transferencia' && Number(r.alimentacion_monto) > 0 ? Number(r.alimentacion_monto) : '',
+      'Tarjeta credito/debito': r.metodo_pago === 'tarjeta' && Number(r.alimentacion_monto) > 0 ? Number(r.alimentacion_monto) : '',
+      'Cortesía': r.cortesia ? 1 : '',
     }));
     datos.push({});
     datos.push({ CAPÍTULO: 'Resumen' });
@@ -1302,6 +1331,7 @@ router.get('/admin/eventos/:evento_id/diplomas/excel', requireAuth, requireModul
     datos.push({ CAPÍTULO: 'Total Efectivo', NOMBRE: totalesPago.efectivo });
     datos.push({ CAPÍTULO: 'Total Transferencia Bancaria', NOMBRE: totalesPago.transferencia });
     datos.push({ CAPÍTULO: 'Total TC / TD', NOMBRE: totalesPago.tarjeta });
+    datos.push({ CAPÍTULO: 'Total Cortesía', NOMBRE: total_cortesia });
 
     const hoja = xlsx.utils.json_to_sheet(datos);
     if (pedidoEnMayusculas(req)) mayusculasEnHoja(hoja);
@@ -1325,7 +1355,7 @@ router.get('/admin/eventos/:evento_id/diplomas/pdf', requireAuth, requireModulo(
     if (evento.rows.length === 0) {
       return res.status(404).json({ error: 'El evento no existe.' });
     }
-    const { rows, total, total_primera_vez, totalesPago } = await obtenerFilasDiplomas(evento_id);
+    const { rows, total, total_primera_vez, total_cortesia, totalesPago } = await obtenerFilasDiplomas(evento_id);
 
     // Vertical (portrait), a pedido de Carlos.
     const doc = new PDFDocument({ size: 'letter', margin: 0, layout: 'portrait' });
@@ -1376,7 +1406,7 @@ router.get('/admin/eventos/:evento_id/diplomas/pdf', requireAuth, requireModulo(
     // centradas (encabezados y datos por igual). Se achicaron un poco
     // zona/capítulo/nombre para que quepa también la columna nueva de
     // Procedencia, sin salirse de la hoja vertical.
-    const anchoCol = { num: 20, zona: 55, capitulo: 55, procedencia: 68, nombre: 92, primera: 38, efectivo: 60, transferencia: 70, tarjeta: 58 };
+    const anchoCol = { num: 20, zona: 62, capitulo: 58, procedencia: 66, nombre: 94, primera: 42, efectivo: 46, transferencia: 44, tarjeta: 54, cortesia: 46 };
     const anchoTabla = Object.values(anchoCol).reduce((a, b) => a + b, 0);
     const inicioTabla = (anchoPagina - anchoTabla) / 2;
     const col = { num: inicioTabla };
@@ -1388,6 +1418,7 @@ router.get('/admin/eventos/:evento_id/diplomas/pdf', requireAuth, requireModulo(
     col.efectivo = col.primera + anchoCol.primera;
     col.transferencia = col.efectivo + anchoCol.efectivo;
     col.tarjeta = col.transferencia + anchoCol.transferencia;
+    col.cortesia = col.tarjeta + anchoCol.tarjeta;
 
     function celda(texto, x, y, ancho, alineacion = 'center') {
       doc.text(texto, x, y, { width: ancho, align: alineacion, ellipsis: true, lineBreak: false });
@@ -1411,7 +1442,8 @@ router.get('/admin/eventos/:evento_id/diplomas/pdf', requireAuth, requireModulo(
       celda('1ER SAEL', col.primera, y, anchoCol.primera);
       celda('EFECTIVO', col.efectivo, y, anchoCol.efectivo);
       celda('TRANSF.', col.transferencia, y, anchoCol.transferencia);
-      celda('TARJETA', col.tarjeta, y, anchoCol.tarjeta);
+      celda('TARJETA C/D', col.tarjeta, y, anchoCol.tarjeta);
+      celda('CORTESÍA', col.cortesia, y, anchoCol.cortesia);
       doc.y = y + 16;
       doc.moveTo(inicioTabla, doc.y).lineTo(inicioTabla + anchoTabla, doc.y).strokeColor('#cccccc').stroke();
       doc.y += 6;
@@ -1453,9 +1485,10 @@ router.get('/admin/eventos/:evento_id/diplomas/pdf', requireAuth, requireModulo(
       celdaEnvuelta(r.procedencia || '', col.procedencia, y, anchoCol.procedencia);
       celdaEnvuelta(r.nombre_completo, col.nombre, y, anchoCol.nombre);
       celda(r.total_saeles === 1 ? '1' : '', col.primera, y, anchoCol.primera);
-      celda(r.metodo_pago === 'efectivo' && r.alimentacion_monto ? `L.${r.alimentacion_monto}` : '', col.efectivo, y, anchoCol.efectivo);
-      celda(r.metodo_pago === 'transferencia' && r.alimentacion_monto ? `L.${r.alimentacion_monto}` : '', col.transferencia, y, anchoCol.transferencia);
-      celda(r.metodo_pago === 'tarjeta' && r.alimentacion_monto ? `L.${r.alimentacion_monto}` : '', col.tarjeta, y, anchoCol.tarjeta);
+      celda(r.metodo_pago === 'efectivo' && Number(r.alimentacion_monto) > 0 ? `L.${r.alimentacion_monto}` : '', col.efectivo, y, anchoCol.efectivo);
+      celda(r.metodo_pago === 'transferencia' && Number(r.alimentacion_monto) > 0 ? `L.${r.alimentacion_monto}` : '', col.transferencia, y, anchoCol.transferencia);
+      celda(r.metodo_pago === 'tarjeta' && Number(r.alimentacion_monto) > 0 ? `L.${r.alimentacion_monto}` : '', col.tarjeta, y, anchoCol.tarjeta);
+      celda(r.cortesia ? '1' : '', col.cortesia, y, anchoCol.cortesia);
 
       if (r.observaciones_pago) {
         doc.font('Helvetica-Oblique').fontSize(6).fillColor('#666666');
@@ -1482,7 +1515,10 @@ router.get('/admin/eventos/:evento_id/diplomas/pdf', requireAuth, requireModulo(
     celda(`L.${totalesPago.efectivo.toFixed(2)}`, col.efectivo, yTotalesDiplomas, anchoCol.efectivo);
     celda(`L.${totalesPago.transferencia.toFixed(2)}`, col.transferencia, yTotalesDiplomas, anchoCol.transferencia);
     celda(`L.${totalesPago.tarjeta.toFixed(2)}`, col.tarjeta, yTotalesDiplomas, anchoCol.tarjeta);
-    doc.font('Helvetica');
+    celda(String(total_cortesia), col.cortesia, yTotalesDiplomas, anchoCol.cortesia);
+    doc.font('Helvetica').fontSize(6).fillColor('#666666');
+    doc.text('TRANSF. = Transferencia bancaria  ·  TARJETA C/D = Tarjeta de crédito/débito  ·  CORTESÍA = inscripción sin costo', inicioTabla, yTotalesDiplomas + 16, { width: anchoTabla, align: 'left', lineBreak: false });
+    doc.fontSize(8).fillColor('#000000');
 
     doc.end();
   } catch (err) {

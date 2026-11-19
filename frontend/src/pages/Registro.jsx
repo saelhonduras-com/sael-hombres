@@ -3,7 +3,7 @@ import { useNavigate, Link } from 'react-router-dom';
 import api, { mensajeError } from '../api';
 import {
   DEPARTAMENTOS_HONDURAS, MUNICIPIOS_POR_DEPARTAMENTO,
-  ZONAS_FIHNEC, ZONAS_POR_DEPARTAMENTO, CARGOS_FIHNEC, ESTADOS_CIVILES,
+  ZONAS_FIHNEC, nombreZona, ZONAS_POR_DEPARTAMENTO, CARGOS_FIHNEC, ESTADOS_CIVILES,
 } from '../listas';
 import SelectorFecha from '../components/SelectorFecha';
 
@@ -546,6 +546,7 @@ export default function Registro() {
               <CampoGrupo etiqueta="Fecha de nacimiento">
                 <SelectorFecha value={formEdicion.fecha_nacimiento} onChange={(v) => setFormEdicion((f) => ({ ...f, fecha_nacimiento: v }))} className={claseInput} />
               </CampoGrupo>
+              <div className="grid gap-4 sm:grid-cols-2 [&>*]:min-w-0">
               <Campo etiqueta="Teléfono móvil (8 dígitos)">
                 <input
                   type="tel" inputMode="numeric" maxLength={8} value={formEdicion.telefono_movil}
@@ -559,6 +560,8 @@ export default function Registro() {
                   {ESTADOS_CIVILES.map((e) => <option key={e}>{e}</option>)}
                 </select>
               </Campo>
+              </div>
+              <div className="grid gap-4 sm:grid-cols-2 [&>*]:min-w-0">
               <Campo etiqueta="Departamento">
                 <select
                   value={formEdicion.departamento}
@@ -575,31 +578,36 @@ export default function Registro() {
                   {municipiosEdicion.map((m) => <option key={m}>{m}</option>)}
                 </select>
               </Campo>
+              </div>
+              <div className="grid gap-4 sm:grid-cols-2 [&>*]:min-w-0">
               <Campo etiqueta="Capítulo">
                 <input type="text" value={formEdicion.capitulo} onChange={(e) => setFormEdicion((f) => ({ ...f, capitulo: e.target.value }))} className={claseInput} placeholder="Nombre de tu capítulo" />
               </Campo>
               <Campo etiqueta="Zona">
                 <select value={formEdicion.zona} onChange={(e) => setFormEdicion((f) => ({ ...f, zona: e.target.value }))} disabled={!formEdicion.departamento} className={`${claseInput} disabled:bg-ink/5`}>
                   <option value="">{formEdicion.departamento ? 'Selecciona…' : 'Primero elige un departamento'}</option>
-                  {zonasEdicion.map((z) => <option key={z}>{z}</option>)}
+                  {zonasEdicion.map((z) => <option key={z} value={z}>{nombreZona(z)}</option>)}
                 </select>
               </Campo>
+              </div>
               <Campo etiqueta="Cargo en FIHNEC">
                 <select value={formEdicion.cargo_fihnec} onChange={(e) => setFormEdicion((f) => ({ ...f, cargo_fihnec: e.target.value }))} className={claseInput}>
                   <option value="">Selecciona…</option>
                   {CARGOS_FIHNEC.map((c) => <option key={c}>{c}</option>)}
                 </select>
               </Campo>
+              <div className="grid gap-4 sm:grid-cols-[3fr_2fr] [&>*]:min-w-0">
               <Campo etiqueta="Contacto de emergencia — nombre">
                 <input type="text" value={formEdicion.contacto_emergencia_nombre} onChange={(e) => setFormEdicion((f) => ({ ...f, contacto_emergencia_nombre: e.target.value }))} className={claseInput} />
               </Campo>
-              <Campo etiqueta="Contacto de emergencia — teléfono (8 dígitos)">
+              <Campo etiqueta="Teléfono (8 dígitos)">
                 <input
                   type="tel" inputMode="numeric" maxLength={8} value={formEdicion.contacto_emergencia_telefono}
                   onChange={(e) => setFormEdicion((f) => ({ ...f, contacto_emergencia_telefono: e.target.value.replace(/\D/g, '') }))}
                   className={claseInput} placeholder="99999999"
                 />
               </Campo>
+              </div>
               <div className="flex justify-between pt-2">
                 <BotonSecundario onClick={() => setEditando(false)}>Cancelar</BotonSecundario>
                 <Boton onClick={guardarEdicionYConfirmar} disabled={cargando} variant="green">
@@ -719,6 +727,7 @@ export default function Registro() {
               <CampoGrupo etiqueta="Fecha de nacimiento">
                 <SelectorFecha value={form.fecha_nacimiento} onChange={(v) => actualizar('fecha_nacimiento', v)} className={claseInput} />
               </CampoGrupo>
+              <div className="grid gap-4 sm:grid-cols-2 [&>*]:min-w-0">
               <Campo etiqueta="Teléfono móvil (8 dígitos)">
                 <input
                   type="tel" inputMode="numeric" maxLength={8} value={form.telefono_movil}
@@ -733,6 +742,7 @@ export default function Registro() {
                   {ESTADOS_CIVILES.map((e) => <option key={e}>{e}</option>)}
                 </select>
               </Campo>
+              </div>
               <div className="flex justify-between pt-2">
                 <BotonSecundario onClick={() => setPaso(1)}>Atrás</BotonSecundario>
                 <Boton onClick={() => validarPaso2() ? setPaso(3) : setError('Completa todos los campos. El teléfono debe tener exactamente 8 dígitos.')}>Continuar</Boton>
@@ -743,6 +753,7 @@ export default function Registro() {
           {paso === 3 && (
             <div className="space-y-4">
               <h2 className="font-display text-xl font-bold text-ink">Ubicación</h2>
+              <div className="grid gap-4 sm:grid-cols-2 [&>*]:min-w-0">
               <Campo etiqueta="Departamento">
                 <select
                   value={form.departamento}
@@ -759,15 +770,18 @@ export default function Registro() {
                   {municipiosDisponibles.map((m) => <option key={m}>{m}</option>)}
                 </select>
               </Campo>
+              </div>
+              <div className="grid gap-4 sm:grid-cols-2 [&>*]:min-w-0">
               <Campo etiqueta="Capítulo">
                 <input type="text" value={form.capitulo} onChange={(e) => actualizar('capitulo', e.target.value)} className={claseInput} placeholder="Nombre de tu capítulo" />
               </Campo>
               <Campo etiqueta="Zona">
                 <select value={form.zona} onChange={(e) => actualizar('zona', e.target.value)} disabled={!form.departamento} className={`${claseInput} disabled:bg-ink/5`}>
                   <option value="">{form.departamento ? 'Selecciona…' : 'Primero elige un departamento'}</option>
-                  {zonasDisponibles.map((z) => <option key={z}>{z}</option>)}
+                  {zonasDisponibles.map((z) => <option key={z} value={z}>{nombreZona(z)}</option>)}
                 </select>
               </Campo>
+              </div>
               <div className="flex justify-between pt-2">
                 <BotonSecundario onClick={() => setPaso(2)}>Atrás</BotonSecundario>
                 <Boton onClick={() => validarPaso3() ? setPaso(4) : setError('Completa todos los campos.')}>Continuar</Boton>
@@ -802,14 +816,16 @@ export default function Registro() {
               </CampoGrupo>
               {form.ha_recibido_saeles === true && (
                 <Campo etiqueta="¿Cuántos, sin contar el de hoy?">
-                  <input
-                    type="number" min="0" max="99" value={form.veces_saeles_previas}
-                    onChange={(e) => {
-                      const val = e.target.value.slice(0, 2);
-                      actualizar('veces_saeles_previas', val === '' ? '' : String(Math.min(Number(val), 99)));
-                    }}
-                    className={claseInput}
-                  />
+                  <div className="w-28">
+                    <input
+                      type="number" min="0" max="99" value={form.veces_saeles_previas}
+                      onChange={(e) => {
+                        const val = e.target.value.slice(0, 2);
+                        actualizar('veces_saeles_previas', val === '' ? '' : String(Math.min(Number(val), 99)));
+                      }}
+                      className={claseInput}
+                    />
+                  </div>
                   <p className="mt-1 text-xs text-ink/40">Máximo 99</p>
                 </Campo>
               )}
@@ -823,10 +839,11 @@ export default function Registro() {
           {paso === 5 && (
             <div className="space-y-4">
               <h2 className="font-display text-xl font-bold text-ink">Contacto de emergencia</h2>
+              <div className="grid gap-4 sm:grid-cols-[3fr_2fr] [&>*]:min-w-0">
               <Campo etiqueta="Nombre completo">
                 <input type="text" value={form.contacto_emergencia_nombre} onChange={(e) => actualizar('contacto_emergencia_nombre', e.target.value)} className={claseInput} />
               </Campo>
-              <Campo etiqueta="Número de teléfono (8 dígitos)">
+              <Campo etiqueta="Teléfono (8 dígitos)">
                 <input
                   type="tel" inputMode="numeric" maxLength={8} value={form.contacto_emergencia_telefono}
                   onChange={(e) => actualizar('contacto_emergencia_telefono', e.target.value.replace(/\D/g, ''))}
@@ -834,6 +851,7 @@ export default function Registro() {
                 />
                 <span className="mt-1 block text-xs text-ink/40">{form.contacto_emergencia_telefono.length}/8 dígitos</span>
               </Campo>
+              </div>
               <div className="flex justify-between pt-2">
                 <BotonSecundario onClick={() => setPaso(4)}>Atrás</BotonSecundario>
                 <Boton onClick={() => validarPaso5() ? setPaso(6) : setError('Completa todos los campos. El teléfono debe tener exactamente 8 dígitos.')}>Continuar</Boton>
