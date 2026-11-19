@@ -1104,63 +1104,78 @@ export default function AdminParticipantes() {
       )}
 
       {vista === 'detalle' && seleccionado && (
-        <div className="mx-auto mt-4 max-w-2xl rounded-2xl border border-ink/10 bg-white p-6 shadow-sm">
-          <div className="flex items-center justify-between">
-            <h2 className="font-display text-lg font-bold text-ink">{seleccionado.nombre_completo}</h2>
-            <div className="flex gap-3">
-              <button onClick={abrirEditar} className={btnEditar}>
+        <div className="mt-4 rounded-2xl border border-ink/10 bg-white p-6 shadow-sm">
+          <div className="flex flex-wrap items-center justify-between gap-4">
+            <div>
+              <h2 className="font-display text-xl font-bold text-ink">{seleccionado.nombre_completo}</h2>
+              <p className="mt-0.5 text-xs capitalize text-ink/50">{seleccionado.tipo_participante}</p>
+            </div>
+            <div className="flex shrink-0 gap-2.5">
+              <button onClick={() => setVista('lista')} className="rounded-[10px] border border-night px-4 py-2 text-sm font-semibold text-night hover:bg-night/5">
+                ← Volver
+              </button>
+              <button onClick={abrirEditar} className="rounded-[10px] bg-[#007334] px-4 py-2 text-sm font-semibold text-white hover:bg-[#005c29]">
                 Editar
               </button>
-              <button onClick={() => setVista('lista')} className="rounded-full bg-night px-4 py-1.5 text-sm font-semibold text-white hover:opacity-90">
-                Volver
-              </button>
-              <button onClick={() => ocultarParticipante(seleccionado.id)} className={btnEliminar}>
+              <button onClick={() => ocultarParticipante(seleccionado.id)} className="rounded-[10px] border border-ember/40 bg-ember/10 px-4 py-2 text-sm font-semibold text-ember hover:bg-ember hover:text-white">
                 Eliminar
               </button>
             </div>
           </div>
 
-          <dl className="mt-4 grid gap-3 text-sm sm:grid-cols-2">
-            <div><dt className="text-ink/50">Identificación</dt><dd className="font-medium text-ink">{textoIdentificacion(seleccionado.tipo_identificacion, seleccionado.numero_identificacion)}</dd></div>
-            <div><dt className="text-ink/50">Tipo</dt><dd className="font-medium text-ink capitalize">{seleccionado.tipo_participante}</dd></div>
-            <div><dt className="text-ink/50">Fecha de nacimiento</dt><dd className="font-medium text-ink">{fechaDMA(seleccionado.fecha_nacimiento)}</dd></div>
-            <div><dt className="text-ink/50">Teléfono</dt><dd className="font-medium text-ink">{seleccionado.telefono_movil || '—'}</dd></div>
-            <div><dt className="text-ink/50">Departamento / Municipio</dt><dd className="font-medium text-ink">{seleccionado.departamento || '—'} / {seleccionado.municipio || '—'}</dd></div>
-            <div><dt className="text-ink/50">Capítulo</dt><dd className="font-medium text-ink">{seleccionado.capitulo || '—'}</dd></div>
-            <div><dt className="text-ink/50">Zona</dt><dd className="font-medium text-ink">{seleccionado.zona || '—'}</dd></div>
-            <div><dt className="text-ink/50">Cargo FIHNEC</dt><dd className="font-medium text-ink">{seleccionado.cargo_fihnec || '—'}</dd></div>
-            <div><dt className="text-ink/50">Estado civil</dt><dd className="font-medium text-ink">{seleccionado.estado_civil || '—'}</dd></div>
-            <div><dt className="text-ink/50">Contacto de emergencia</dt><dd className="font-medium text-ink">{seleccionado.contacto_emergencia_nombre || '—'} {seleccionado.contacto_emergencia_telefono ? `(${seleccionado.contacto_emergencia_telefono})` : ''}</dd></div>
-            <div><dt className="text-ink/50">Total de SAELES</dt><dd className="font-medium text-ink">{seleccionado.total_saeles} <span className="text-xs text-ink/40">(solo encuentros con presencia confirmada)</span></dd></div>
-          </dl>
+          <div className="mt-5 grid gap-6 border-t border-ink/10 pt-5 lg:grid-cols-[1.25fr_1fr_1fr] lg:gap-0">
+            <div className="lg:pr-6">
+              <h3 className="font-display text-sm font-bold text-night">Datos personales</h3>
+              <dl className="mt-2 grid grid-cols-1 gap-x-5 gap-y-3 text-sm sm:grid-cols-2">
+                <div><dt className="text-xs text-ink/50">Identificación</dt><dd className="font-medium text-ink">{textoIdentificacion(seleccionado.tipo_identificacion, seleccionado.numero_identificacion)}</dd></div>
+                <div><dt className="text-xs text-ink/50">Fecha de nacimiento</dt><dd className="font-medium text-ink">{fechaDMA(seleccionado.fecha_nacimiento)}</dd></div>
+                <div><dt className="text-xs text-ink/50">Teléfono</dt><dd className="font-medium text-ink">{seleccionado.telefono_movil || '—'}</dd></div>
+                <div><dt className="text-xs text-ink/50">Estado civil</dt><dd className="font-medium text-ink">{seleccionado.estado_civil || '—'}</dd></div>
+                <div className="sm:col-span-2"><dt className="text-xs text-ink/50">Contacto de emergencia</dt><dd className="font-medium text-ink">{seleccionado.contacto_emergencia_nombre || '—'} {seleccionado.contacto_emergencia_telefono ? `(${seleccionado.contacto_emergencia_telefono})` : ''}</dd></div>
+              </dl>
+            </div>
 
-          <div className="mt-6 flex flex-wrap items-center justify-between gap-2">
-            <h3 className="font-display text-sm font-bold text-ink">Historial de inscripciones</h3>
-            {eventoActual?.abierto && !seleccionado.inscripciones.some((i) => Number(i.evento_id) === Number(eventoActual.id)) && (
-              <button onClick={() => inscribirAlEventoActual(seleccionado.id)} className={btnEditar}>
-                Inscribir a {eventoActual.nombre}
-              </button>
-            )}
+            <div className="lg:border-l lg:border-ink/10 lg:px-6">
+              <h3 className="font-display text-sm font-bold text-night">Ubicación y FIHNEC</h3>
+              <dl className="mt-2 grid grid-cols-1 gap-x-5 gap-y-3 text-sm sm:grid-cols-2">
+                <div><dt className="text-xs text-ink/50">Capítulo</dt><dd className="font-medium text-ink">{seleccionado.capitulo || '—'}</dd></div>
+                <div><dt className="text-xs text-ink/50">Zona</dt><dd className="font-medium text-ink">{nombreZona(seleccionado.zona) || '—'}</dd></div>
+                <div className="sm:col-span-2"><dt className="text-xs text-ink/50">Departamento / Municipio</dt><dd className="font-medium text-ink">{seleccionado.departamento || '—'} / {seleccionado.municipio || '—'}</dd></div>
+                <div className="sm:col-span-2"><dt className="text-xs text-ink/50">Cargo FIHNEC</dt><dd className="font-medium text-ink">{seleccionado.cargo_fihnec || '—'}</dd></div>
+                <div className="sm:col-span-2"><dt className="text-xs text-ink/50">Total de SAELES</dt><dd className="font-medium text-ink">{seleccionado.total_saeles} <span className="text-xs text-ink/40">(solo encuentros con presencia confirmada)</span></dd></div>
+              </dl>
+            </div>
+
+            <div className="lg:border-l lg:border-ink/10 lg:pl-6">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <h3 className="font-display text-sm font-bold text-night">Historial de inscripciones</h3>
+                {eventoActual?.abierto && !seleccionado.inscripciones.some((i) => Number(i.evento_id) === Number(eventoActual.id)) && (
+                  <button onClick={() => inscribirAlEventoActual(seleccionado.id)} className="rounded-[10px] bg-[#007334] px-3 py-1.5 text-xs font-semibold text-white hover:bg-[#005c29]">
+                    Inscribir a {eventoActual.nombre}
+                  </button>
+                )}
+              </div>
+              {seleccionado.inscripciones.length === 0 ? (
+                <p className="mt-2 text-sm text-ink/40">Sin inscripciones registradas todavía.</p>
+              ) : (
+                <ul className="mt-2 space-y-2">
+                  {seleccionado.inscripciones.map((i) => (
+                    <li key={i.id} className="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-ink/5 px-3 py-2 text-sm text-ink/70">
+                      <span>{i.evento_nombre} — {i.fecha_inicio.slice(0, 10)}</span>
+                      <label className="flex items-center gap-2 text-xs text-ink/60">
+                        <input
+                          type="checkbox"
+                          checked={i.registrado_presencial}
+                          onChange={(e) => marcarPresencial(i.id, e.target.checked)}
+                        />
+                        Registrado presencial
+                      </label>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
           </div>
-          {seleccionado.inscripciones.length === 0 ? (
-            <p className="mt-2 text-sm text-ink/40">Sin inscripciones registradas todavía.</p>
-          ) : (
-            <ul className="mt-2 space-y-2">
-              {seleccionado.inscripciones.map((i) => (
-                <li key={i.id} className="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-ink/5 px-3 py-2 text-sm text-ink/70">
-                  <span>{i.evento_nombre} — {i.fecha_inicio.slice(0, 10)}</span>
-                  <label className="flex items-center gap-2 text-xs text-ink/60">
-                    <input
-                      type="checkbox"
-                      checked={i.registrado_presencial}
-                      onChange={(e) => marcarPresencial(i.id, e.target.checked)}
-                    />
-                    Registrado presencial
-                  </label>
-                </li>
-              ))}
-            </ul>
-          )}
         </div>
       )}
 

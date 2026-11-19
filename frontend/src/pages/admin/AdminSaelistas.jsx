@@ -23,7 +23,6 @@ function claseSeg(activa) {
 }
 const claseFiltro = 'w-48 rounded-lg border border-ink/15 px-3 py-1.5 text-xs focus:border-ember focus:outline-none';
 const btnVer = 'rounded-full border border-ink/20 px-3 py-1 text-xs font-semibold text-ink/70 hover:bg-ink/5';
-const btnEditar = 'rounded-full bg-[#007334] px-3 py-1 text-xs font-semibold text-white hover:bg-[#005c29]';
 const btnEliminar = 'rounded-full bg-ember px-3 py-1 text-xs font-semibold text-white hover:bg-ember-light';
 
 const vacio = {
@@ -592,62 +591,67 @@ export default function AdminSaelistas() {
       )}
 
       {vista === 'detalle' && seleccionado && (
-        <div className="mx-auto mt-4 max-w-2xl rounded-2xl border border-ink/10 bg-white p-6 shadow-sm">
-          <div className="flex items-start justify-between gap-4">
+        <div className="mt-4 rounded-2xl border border-ink/10 bg-white p-6 shadow-sm">
+          <div className="flex flex-wrap items-center justify-between gap-4">
             <div className="flex items-center gap-4">
               {seleccionado.foto ? (
-                <img src={seleccionado.foto} alt={seleccionado.nombre_completo} className="h-20 w-20 rounded-full object-cover" />
+                <img src={seleccionado.foto} alt={seleccionado.nombre_completo} className="h-16 w-16 rounded-full object-cover" />
               ) : (
-                <div className="flex h-20 w-20 items-center justify-center rounded-full bg-ink/5 text-2xl text-ink/30">👤</div>
+                <div className="flex h-16 w-16 items-center justify-center rounded-full bg-ink/5 text-2xl text-ink/30">👤</div>
               )}
               <div>
-                <h2 className="font-display text-lg font-bold text-ink">{seleccionado.nombre_completo}</h2>
+                <h2 className="font-display text-xl font-bold text-ink">{seleccionado.nombre_completo}</h2>
                 {seleccionado.es_aspirante && <span className="mt-1 inline-block rounded-full bg-flame/15 px-2 py-0.5 text-xs font-semibold text-flame">Aspirante</span>}
               </div>
             </div>
-            <div className="flex shrink-0 gap-3">
-              <button onClick={() => abrirEditar(seleccionado)} className={btnEditar}>Editar</button>
-              <button onClick={() => setVista('lista')} className="rounded-full bg-night px-4 py-1.5 text-sm font-semibold text-white hover:opacity-90">Volver</button>
-              <button onClick={() => eliminar(seleccionado.id, seleccionado.nombre_completo)} className={btnEliminar}>Eliminar</button>
+            <div className="flex shrink-0 gap-2.5">
+              <button onClick={() => setVista('lista')} className="rounded-[10px] border border-night px-4 py-2 text-sm font-semibold text-night hover:bg-night/5">← Volver</button>
+              <button onClick={() => abrirEditar(seleccionado)} className="rounded-[10px] bg-[#007334] px-4 py-2 text-sm font-semibold text-white hover:bg-[#005c29]">Editar</button>
+              <button onClick={() => eliminar(seleccionado.id, seleccionado.nombre_completo)} className="rounded-[10px] border border-ember/40 bg-ember/10 px-4 py-2 text-sm font-semibold text-ember hover:bg-ember hover:text-white">Eliminar</button>
             </div>
           </div>
 
-          <h3 className="mt-6 font-display text-sm font-bold text-ink">Datos personales</h3>
-          <dl className="mt-2 grid gap-3 text-sm sm:grid-cols-2">
-            <div><dt className="text-ink/50">DNI</dt><dd className="font-medium text-ink">{seleccionado.dni || '—'}</dd></div>
-            <div><dt className="text-ink/50">Fecha de nacimiento</dt><dd className="font-medium text-ink">{fechaDMA(seleccionado.fecha_nacimiento)}</dd></div>
-            <div><dt className="text-ink/50">Celular</dt><dd className="font-medium text-ink">{seleccionado.celular || '—'}</dd></div>
-            <div><dt className="text-ink/50">Email</dt><dd className="font-medium text-ink">{seleccionado.email || '—'}</dd></div>
-            <div><dt className="text-ink/50">Estado civil</dt><dd className="font-medium text-ink">{seleccionado.estado_civil || '—'}</dd></div>
-            <div><dt className="text-ink/50">Nombre de esposa</dt><dd className="font-medium text-ink">{seleccionado.nombre_esposa || '—'}</dd></div>
-            <div><dt className="text-ink/50">Hijos / Nietos</dt><dd className="font-medium text-ink">{seleccionado.hijos_cantidad ?? '—'} / {seleccionado.nietos_cantidad ?? '—'}</dd></div>
-            <div><dt className="text-ink/50">Profesión</dt><dd className="font-medium text-ink">{seleccionado.profesion || '—'}</dd></div>
-            <div><dt className="text-ink/50">Contacto de emergencia</dt><dd className="font-medium text-ink">{seleccionado.contacto_emergencia_telefono || '—'}</dd></div>
-          </dl>
+          <div className="mt-5 grid gap-6 border-t border-ink/10 pt-5 lg:grid-cols-[1.25fr_1fr_1fr] lg:gap-0">
+            <div className="lg:pr-6">
+              <h3 className="font-display text-sm font-bold text-night">Datos personales</h3>
+              <dl className="mt-2 grid grid-cols-1 gap-x-5 gap-y-3 text-sm sm:grid-cols-2">
+                <div><dt className="text-xs text-ink/50">DNI</dt><dd className="font-medium text-ink">{seleccionado.dni || '—'}</dd></div>
+                <div><dt className="text-xs text-ink/50">Fecha de nacimiento</dt><dd className="font-medium text-ink">{fechaDMA(seleccionado.fecha_nacimiento)}</dd></div>
+                <div><dt className="text-xs text-ink/50">Celular</dt><dd className="font-medium text-ink">{seleccionado.celular || '—'}</dd></div>
+                <div><dt className="text-xs text-ink/50">Email</dt><dd className="break-all font-medium text-ink">{seleccionado.email || '—'}</dd></div>
+                <div><dt className="text-xs text-ink/50">Estado civil</dt><dd className="font-medium text-ink">{seleccionado.estado_civil || '—'}</dd></div>
+                <div><dt className="text-xs text-ink/50">Nombre de esposa</dt><dd className="font-medium text-ink">{seleccionado.nombre_esposa || '—'}</dd></div>
+                <div><dt className="text-xs text-ink/50">Hijos / Nietos</dt><dd className="font-medium text-ink">{seleccionado.hijos_cantidad ?? '—'} / {seleccionado.nietos_cantidad ?? '—'}</dd></div>
+                <div><dt className="text-xs text-ink/50">Profesión</dt><dd className="font-medium text-ink">{seleccionado.profesion || '—'}</dd></div>
+                <div><dt className="text-xs text-ink/50">Contacto de emergencia</dt><dd className="font-medium text-ink">{seleccionado.contacto_emergencia_telefono || '—'}</dd></div>
+              </dl>
+            </div>
 
-          <h3 className="mt-6 font-display text-sm font-bold text-ink">Ubicación</h3>
-          <dl className="mt-2 grid gap-3 text-sm sm:grid-cols-2">
-            <div><dt className="text-ink/50">Capítulo</dt><dd className="font-medium text-ink">{seleccionado.capitulo || '—'}</dd></div>
-            <div><dt className="text-ink/50">Zona</dt><dd className="font-medium text-ink">{nombreZona(seleccionado.zona) || '—'}</dd></div>
-            <div><dt className="text-ink/50">Departamento / Municipio</dt><dd className="font-medium text-ink">{seleccionado.departamento || '—'} / {seleccionado.municipio || '—'}</dd></div>
-          </dl>
+            <div className="lg:border-l lg:border-ink/10 lg:px-6">
+              <h3 className="font-display text-sm font-bold text-night">Ubicación</h3>
+              <dl className="mt-2 grid grid-cols-1 gap-x-5 gap-y-3 text-sm sm:grid-cols-2">
+                <div><dt className="text-xs text-ink/50">Capítulo</dt><dd className="font-medium text-ink">{seleccionado.capitulo || '—'}</dd></div>
+                <div><dt className="text-xs text-ink/50">Zona</dt><dd className="font-medium text-ink">{nombreZona(seleccionado.zona) || '—'}</dd></div>
+                <div className="sm:col-span-2"><dt className="text-xs text-ink/50">Departamento / Municipio</dt><dd className="font-medium text-ink">{seleccionado.departamento || '—'} / {seleccionado.municipio || '—'}</dd></div>
+              </dl>
 
-          <h3 className="mt-6 font-display text-sm font-bold text-ink">Organizacional / FIHNEC</h3>
-          <dl className="mt-2 grid gap-3 text-sm sm:grid-cols-2">
-            <div><dt className="text-ink/50">Fecha inscripción capítulo</dt><dd className="font-medium text-ink">{fechaDMA(seleccionado.fecha_inscripcion_capitulo)}</dd></div>
-            <div><dt className="text-ink/50">Tiempo en FIHNEC</dt><dd className="font-medium text-ink">{seleccionado.tiempo_fihnec || '—'}</dd></div>
-            <div><dt className="text-ink/50">Cargo actual</dt><dd className="font-medium text-ink">{seleccionado.cargo_actual || '—'}</dd></div>
-          </dl>
-          <div className="mt-3 text-sm">
-            <p className="text-ink/50">Cargos desempeñados (histórico)</p>
-            <p className="mt-1 text-ink">{seleccionado.cargos_desempenados?.length ? seleccionado.cargos_desempenados.join(', ') : '—'}</p>
-          </div>
+              <h3 className="mt-5 font-display text-sm font-bold text-night">Organizacional / FIHNEC</h3>
+              <dl className="mt-2 grid grid-cols-1 gap-x-5 gap-y-3 text-sm sm:grid-cols-2">
+                <div><dt className="text-xs text-ink/50">Fecha inscripción capítulo</dt><dd className="font-medium text-ink">{fechaDMA(seleccionado.fecha_inscripcion_capitulo)}</dd></div>
+                <div><dt className="text-xs text-ink/50">Tiempo en FIHNEC</dt><dd className="font-medium text-ink">{seleccionado.tiempo_fihnec || '—'}</dd></div>
+                <div className="sm:col-span-2"><dt className="text-xs text-ink/50">Cargo actual</dt><dd className="font-medium text-ink">{seleccionado.cargo_actual || '—'}</dd></div>
+                <div className="sm:col-span-2"><dt className="text-xs text-ink/50">Cargos desempeñados (histórico)</dt><dd className="font-medium text-ink">{seleccionado.cargos_desempenados?.length ? seleccionado.cargos_desempenados.join(', ') : '—'}</dd></div>
+              </dl>
+            </div>
 
-          <h3 className="mt-6 font-display text-sm font-bold text-ink">Testimonio y formación</h3>
-          <div className="mt-2 space-y-2 text-sm">
-            <p><span className="text-ink/50">Tipo de testimonio:</span> <span className="text-ink">{seleccionado.tipo_testimonio?.length ? seleccionado.tipo_testimonio.join(', ') : '—'}</span></p>
-            <p><span className="text-ink/50">Formación oficial:</span> <span className="text-ink">{seleccionado.formacion_oficial?.length ? seleccionado.formacion_oficial.join(', ') : '—'}</span></p>
-            <p><span className="text-ink/50">Otras participaciones:</span> <span className="text-ink">{seleccionado.otras_participaciones?.length ? seleccionado.otras_participaciones.join(', ') : '—'}</span></p>
+            <div className="lg:border-l lg:border-ink/10 lg:pl-6">
+              <h3 className="font-display text-sm font-bold text-night">Testimonio y formación</h3>
+              <dl className="mt-2 space-y-3 text-sm">
+                <div><dt className="text-xs text-ink/50">Tipo de testimonio</dt><dd className="font-medium text-ink">{seleccionado.tipo_testimonio?.length ? seleccionado.tipo_testimonio.join(', ') : '—'}</dd></div>
+                <div><dt className="text-xs text-ink/50">Formación oficial</dt><dd className="font-medium text-ink">{seleccionado.formacion_oficial?.length ? seleccionado.formacion_oficial.join(', ') : '—'}</dd></div>
+                <div><dt className="text-xs text-ink/50">Otras participaciones</dt><dd className="font-medium text-ink">{seleccionado.otras_participaciones?.length ? seleccionado.otras_participaciones.join(', ') : '—'}</dd></div>
+              </dl>
+            </div>
           </div>
         </div>
       )}

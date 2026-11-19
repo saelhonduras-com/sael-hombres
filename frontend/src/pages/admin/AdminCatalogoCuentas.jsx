@@ -158,23 +158,21 @@ export default function AdminCatalogoCuentas() {
 
       {error && <p className="mt-4 rounded-lg bg-ember/10 p-3 text-sm text-ember">{error}</p>}
 
-      <div className="mt-4 flex gap-2">
+      <div className="mt-4 inline-flex gap-0.5 rounded-xl border border-night/15 bg-white p-1">
         <button
           onClick={() => setTipoActivo('ingreso')}
-          className={`rounded-full px-4 py-1.5 text-xs font-semibold transition ${
-            tipoActivo === 'ingreso' ? 'bg-[#007334] text-white' : 'border border-ink/15 text-ink/70 hover:bg-ink/5'
+          className={`rounded-lg px-4 py-2 text-sm font-semibold transition ${
+            tipoActivo === 'ingreso' ? 'bg-[#007334] text-white shadow-sm' : 'text-night/60 hover:bg-night/5 hover:text-night'
           }`}
         >
-          {tipoActivo !== 'ingreso' && <span className="mr-1.5 inline-block h-2 w-2 rounded-full align-middle bg-[#007334]" />}
           Ingresos
         </button>
         <button
           onClick={() => setTipoActivo('egreso')}
-          className={`rounded-full px-4 py-1.5 text-xs font-semibold transition ${
-            tipoActivo === 'egreso' ? 'bg-ember text-white' : 'border border-ink/15 text-ink/70 hover:bg-ink/5'
+          className={`rounded-lg px-4 py-2 text-sm font-semibold transition ${
+            tipoActivo === 'egreso' ? 'bg-ember text-white shadow-sm' : 'text-night/60 hover:bg-night/5 hover:text-night'
           }`}
         >
-          {tipoActivo !== 'egreso' && <span className="mr-1.5 inline-block h-2 w-2 rounded-full align-middle bg-ember" />}
           Egresos
         </button>
       </div>
