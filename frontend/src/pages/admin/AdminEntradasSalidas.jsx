@@ -250,7 +250,7 @@ export default function AdminEntradasSalidas() {
         <div className="mt-4 space-y-6">
           {/* BOLETERÍA */}
           {seccion === 'boleteria' && (
-          <div className="rounded-2xl border border-ink/10 border-l-4 border-l-[#FDC41F] bg-white p-6 shadow-sm">
+          <div className="rounded-2xl border border-ink/10 border-l-4 border-l-[#FDC41F] bg-white p-4 shadow-sm sm:p-6">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <div>
                 <h2 className="font-display text-lg font-bold text-ink">Boletería</h2>
@@ -392,7 +392,7 @@ export default function AdminEntradasSalidas() {
               Saelistas para el evento, o solo Saelistas para Vigilia),
               solo el precio unitario se escribe a mano. */}
           {seccion === 'comida' && (
-          <div className="rounded-2xl border border-ink/10 border-l-4 border-l-[#1F3464] bg-white p-6 shadow-sm">
+          <div className="rounded-2xl border border-ink/10 border-l-4 border-l-[#1F3464] bg-white p-4 shadow-sm sm:p-6">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <div>
                 <h2 className="font-display text-lg font-bold text-ink">Precio por Comida</h2>
@@ -454,7 +454,7 @@ export default function AdminEntradasSalidas() {
 
           {/* INGRESO POR PERSONA DE HABITACIONES (antes "Hotel por módulo") */}
           {seccion === 'habitaciones' && (
-          <div className="rounded-2xl border border-ink/10 border-l-4 border-l-[#0F7173] bg-white p-6 shadow-sm">
+          <div className="rounded-2xl border border-ink/10 border-l-4 border-l-[#0F7173] bg-white p-4 shadow-sm sm:p-6">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <div>
                 <h2 className="font-display text-lg font-bold text-ink">Aquí se controla el ingreso por persona de las habitaciones</h2>
@@ -644,7 +644,7 @@ function SeccionValoresCuenta({ titulo, subtitulo, tipo, eventoId, onError, pued
   }
 
   return (
-    <div className="rounded-2xl border border-ink/10 border-l-4 bg-white p-6 shadow-sm" style={{ borderLeftColor: colorBorde }}>
+    <div className="rounded-2xl border border-ink/10 border-l-4 bg-white p-4 shadow-sm sm:p-6" style={{ borderLeftColor: colorBorde }}>
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div>
           <h2 className="font-display text-lg font-bold text-ink">{titulo}</h2>

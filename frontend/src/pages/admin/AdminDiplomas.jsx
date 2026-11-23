@@ -233,8 +233,39 @@ export default function AdminDiplomas() {
           {cargando ? (
             <p className="mt-6 text-ink/40">Cargando…</p>
           ) : (
-            <div className="mt-4 overflow-x-auto rounded-2xl border border-ink/10 bg-white shadow-sm">
-              <table className="w-full text-sm">
+            <div className="mt-4 overflow-x-auto rounded-2xl border border-ink/10 bg-white shadow-sm max-md:overflow-visible max-md:border-0 max-md:bg-transparent max-md:shadow-none">
+              {/* Celular: tarjetas en lugar de tabla (la tabla se ve desde md:) */}
+              <div className="space-y-2 md:hidden print:hidden">
+                {(!datos || datos.filas.length === 0) && (
+                  <p className="rounded-2xl bg-white px-4 py-6 text-center text-sm text-ink/40 shadow-sm">Todavía no hay participantes con asistencia confirmada en este evento.</p>
+                )}
+                {datos?.filas.slice((pagina - 1) * POR_PAGINA, pagina * POR_PAGINA).map((f) => {
+                  const monto = Number(f.alimentacion_monto) > 0 ? `L. ${f.alimentacion_monto}` : '';
+                  const metodo = { efectivo: 'Efectivo', transferencia: 'Transferencia', tarjeta: 'Tarjeta' }[f.metodo_pago];
+                  return (
+                    <div key={f.numero} className="rounded-2xl bg-white p-3.5 shadow-sm">
+                      <div className="flex items-start justify-between gap-2">
+                        <p className="font-semibold text-ink"><span className="mr-1.5 text-ink/40">{f.numero}.</span>{f.nombre_completo}</p>
+                        <div className="flex shrink-0 gap-1">
+                          {f.primera_vez && <span className="rounded-full bg-gold/30 px-2 py-0.5 text-[10px] font-bold text-night">1er SAEL</span>}
+                          {f.cortesia && <span className="rounded-full bg-night/10 px-2 py-0.5 text-[10px] font-bold text-night">Cortesía</span>}
+                        </div>
+                      </div>
+                      <p className="mt-1 text-xs text-ink/60">{[nombreZona(f.zona), f.capitulo, f.procedencia].filter(Boolean).join(' · ') || '—'}</p>
+                      {monto && metodo && (
+                        <p className="mt-1.5 text-xs font-semibold text-[#007334]">{metodo} · {monto}</p>
+                      )}
+                    </div>
+                  );
+                })}
+                {datos && datos.total > 0 && (
+                  <div className="rounded-2xl bg-[#007334]/10 p-3.5 text-xs font-semibold text-ink">
+                    <p>Total: {datos.total} · 1ra vez: {datos.total_primera_vez} · Cortesías: {datos.total_cortesia ?? 0}</p>
+                    <p className="mt-1">Efectivo L. {datos.totalesPago?.efectivo?.toFixed(2) ?? '0.00'} · Transf. L. {datos.totalesPago?.transferencia?.toFixed(2) ?? '0.00'} · Tarjeta L. {datos.totalesPago?.tarjeta?.toFixed(2) ?? '0.00'}</p>
+                  </div>
+                )}
+              </div>
+              <table className="hidden w-full text-sm md:table print:table">
                 <thead>
                   <tr className="border-b border-ink/10 bg-[#007334]/10 text-left text-xs uppercase tracking-wide text-[#007334]">
                     <th className="px-4 py-3">#</th>

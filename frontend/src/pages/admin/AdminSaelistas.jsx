@@ -3,7 +3,7 @@ import { useOutletContext } from 'react-router-dom';
 import api, { mensajeError } from '../../api';
 import {
   DEPARTAMENTOS_HONDURAS, MUNICIPIOS_POR_DEPARTAMENTO, ZONAS_FIHNEC, nombreZona,
-  CARGOS_FIHNEC, CARGOS_HISTORICO, ESTADOS_CIVILES,
+  CARGOS_FIHNEC, CARGOS_HISTORICO, ESTADOS_CIVILES, soloDigitosDni, formatoDniEscribiendo,
   TIPOS_TESTIMONIO, FORMACION_OFICIAL, OTRAS_PARTICIPACIONES,
 } from '../../listas';
 
@@ -21,7 +21,7 @@ const segContenedor = 'inline-flex flex-wrap gap-0.5 rounded-xl border border-ni
 function claseSeg(activa) {
   return `rounded-lg px-4 py-2 text-sm font-semibold transition ${activa ? 'bg-night text-white shadow-sm' : 'text-night/60 hover:bg-night/5 hover:text-night'}`;
 }
-const claseFiltro = 'w-48 rounded-lg border border-ink/15 px-3 py-1.5 text-xs focus:border-ember focus:outline-none';
+const claseFiltro = 'w-full sm:w-48 rounded-lg border border-ink/15 px-3 py-1.5 text-xs focus:border-ember focus:outline-none';
 const btnVer = 'rounded-full border border-ink/20 px-3 py-1 text-xs font-semibold text-ink/70 hover:bg-ink/5';
 const btnEliminar = 'rounded-full bg-ember px-3 py-1 text-xs font-semibold text-white hover:bg-ember-light';
 
@@ -94,6 +94,7 @@ export default function AdminSaelistas() {
   const [error, setError] = useState('');
   const [buscar, setBuscar] = useState('');
   const [zonaFiltro, setZonaFiltro] = useState('');
+  const [filtrosAbiertos, setFiltrosAbiertos] = useState(false); // solo aplica en celular
   const [aviso, setAviso] = useState(''); // avisito breve que desaparece solo, sin bloquear la pantalla
   function mostrarAviso(mensaje) {
     setAviso(mensaje);
@@ -482,7 +483,7 @@ export default function AdminSaelistas() {
                 >
                   Limpiar filtros
                 </button>
-                <div className="flex min-w-[330px] items-center justify-between gap-5 rounded-xl bg-night px-5 py-2 text-white">
+                <div className="flex w-full items-center justify-between sm:w-auto sm:min-w-[330px] gap-5 rounded-xl bg-night px-5 py-2 text-white">
                   <div>
                     <p className="text-[10px] uppercase tracking-wide text-white/60">Evento actual</p>
                     <p className="font-display text-base font-bold leading-tight">{eventoActual.nombre}</p>
@@ -495,8 +496,30 @@ export default function AdminSaelistas() {
               </form>
 
               {cargandoAsistencia ? <p className="mt-6 text-ink/40">Cargando…</p> : (
-                <div className="mt-4 overflow-hidden rounded-2xl border border-ink/10 bg-white shadow-sm">
-                  <table className="w-full text-sm">
+                <div className="mt-4 overflow-hidden rounded-2xl sm:border sm:border-ink/10 sm:bg-white sm:shadow-sm">
+                  {/* ===== Celular: tarjetas con interruptor grande ===== */}
+                  <div className="space-y-2 sm:hidden">
+                    {asistencia.length === 0 && (
+                      <p className="rounded-2xl bg-white p-5 text-center text-sm text-ink/40">Sin saelistas en el catálogo todavía.</p>
+                    )}
+                    {asistencia.map((s) => (
+                      <div key={s.saelista_id} className="flex items-center justify-between gap-3 rounded-2xl border border-ink/10 bg-white px-4 py-3 shadow-sm">
+                        <div className="min-w-0">
+                          <p className="truncate text-base font-semibold text-ink">{s.nombre_completo}</p>
+                          <p className="truncate text-xs text-ink/50">{[s.capitulo, nombreZona(s.zona)].filter(Boolean).join(' · ') || '—'}</p>
+                        </div>
+                        <button
+                          type="button" role="switch" aria-checked={s.registrado_presencial}
+                          aria-label={`Asistencia de ${s.nombre_completo}`}
+                          onClick={() => marcarAsistencia(s.saelista_id, !s.registrado_presencial)}
+                          className={`relative h-8 w-14 shrink-0 rounded-full transition ${s.registrado_presencial ? 'bg-[#007334]' : 'bg-ink/20'}`}
+                        >
+                          <span className={`absolute top-1 h-6 w-6 rounded-full bg-white shadow transition-all ${s.registrado_presencial ? 'left-7' : 'left-1'}`} />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                  <table className="hidden w-full text-sm sm:table">
                     <thead>
                       <tr className="border-b border-ink/10 bg-[#1F3464]/10 text-left text-xs uppercase tracking-wide text-[#1F3464]">
                         <th className="px-4 py-3">Nombre</th>
@@ -539,6 +562,26 @@ export default function AdminSaelistas() {
               placeholder="Buscar por nombre o DNI"
               className={`${claseInput} flex-1 min-w-[160px] py-1.5`}
             />
+            <button
+              type="button"
+              onClick={() => setFiltrosAbiertos((v) => !v)}
+              className="shrink-0 rounded-[10px] border border-night px-4 py-2 text-sm font-semibold text-night sm:hidden"
+            >
+              Filtros{[zonaFiltro, aspiranteFiltro].filter(Boolean).length > 0 ? ` (${[zonaFiltro, aspiranteFiltro].filter(Boolean).length})` : ''}
+            </button>
+<div className="flex w-full flex-wrap gap-1.5 sm:hidden">
+              {zonaFiltro && (
+                <button type="button" onClick={() => { setZonaFiltro(''); cargarLista(buscar, '', aspiranteFiltro); }} className="inline-flex items-center gap-1 rounded-full bg-night/10 px-2.5 py-1 text-xs font-semibold text-night">
+                  {nombreZona(zonaFiltro)} ✕
+                </button>
+              )}
+              {aspiranteFiltro && (
+                <button type="button" onClick={() => { setAspiranteFiltro(''); cargarLista(buscar, zonaFiltro, ''); }} className="inline-flex items-center gap-1 rounded-full bg-night/10 px-2.5 py-1 text-xs font-semibold text-night">
+                  Aspirantes ✕
+                </button>
+              )}
+            </div>
+                        <div className={`${filtrosAbiertos ? 'flex' : 'hidden'} w-full flex-col gap-2 sm:contents`}>
             <select value={zonaFiltro} onChange={(e) => setZonaFiltro(e.target.value)} className={claseFiltro}>
               <option value="">Todas las zonas</option>
               {ZONAS_FIHNEC.map((z) => <option key={z} value={z}>{nombreZona(z)}</option>)}
@@ -547,6 +590,7 @@ export default function AdminSaelistas() {
               <option value="">Todos</option>
               <option value="true">Aspirantes</option>
             </select>
+            </div>
             <button type="submit" className="rounded-full bg-[#007334] px-4 py-1.5 text-xs font-semibold text-white hover:bg-[#005c29]">Buscar</button>
             <button type="button" onClick={limpiarFiltros} className="rounded-full border border-night-2/40 bg-night-2/10 px-4 py-1.5 text-xs font-semibold text-night hover:bg-night-2/20">Limpiar filtros</button>
           </form>
@@ -657,7 +701,7 @@ export default function AdminSaelistas() {
       )}
 
       {vista === 'formulario' && (
-        <div className="mx-auto mt-4 max-w-3xl rounded-2xl border border-ink/10 bg-white p-6 shadow-sm">
+        <div className="mx-auto mt-4 max-w-3xl rounded-2xl border border-ink/10 bg-white p-6 pb-24 sm:pb-6 shadow-sm">
           <h2 className="font-display text-lg font-bold text-ink">{editandoId === 'nuevo' ? 'Nuevo Saelista' : 'Editar Saelista'}</h2>
 
           <div className="mt-4 flex items-center gap-4">
@@ -685,7 +729,7 @@ export default function AdminSaelistas() {
             </label>
             <label>
               <span className="mb-1 block text-xs font-semibold text-ink/60">DNI</span>
-              <input type="text" value={form.dni} onChange={(e) => setForm((f) => ({ ...f, dni: e.target.value }))} className={claseInput} />
+              <input type="text" inputMode="numeric" maxLength={17} placeholder="0801-1990-12345" value={formatoDniEscribiendo(form.dni)} onChange={(e) => setForm((f) => ({ ...f, dni: soloDigitosDni(e.target.value) }))} className={claseInput} />
             </label>
             <label>
               <span className="mb-1 block text-xs font-semibold text-ink/60">Fecha de nacimiento</span>
@@ -800,11 +844,11 @@ export default function AdminSaelistas() {
             </div>
           </div>
 
-          <div className="mt-6 flex justify-end gap-3">
-            <button onClick={() => setVista(editandoId === 'nuevo' ? 'lista' : 'detalle')} className="rounded-full border border-ink/20 px-5 py-2 text-sm font-semibold text-ink/70 hover:bg-ink/5">
+          <div className="fixed inset-x-0 bottom-0 z-40 flex gap-3 border-t border-ink/10 bg-white p-3 shadow-[0_-4px_12px_rgba(0,0,0,0.08)] sm:static sm:z-auto sm:mt-6 sm:justify-end sm:border-0 sm:bg-transparent sm:p-0 sm:shadow-none [&>*:first-child]:flex-none [&>*:last-child]:flex-1 sm:[&>*:last-child]:flex-none">
+            <button onClick={() => setVista(editandoId === 'nuevo' ? 'lista' : 'detalle')} className="rounded-2xl border border-ink/20 px-5 py-3.5 text-base font-semibold text-ink/70 sm:rounded-full sm:py-2 sm:text-sm hover:bg-ink/5">
               Cancelar
             </button>
-            <button onClick={guardar} disabled={guardando} className="rounded-full bg-[#007334] px-5 py-2 text-sm font-semibold text-white hover:bg-[#005c29] disabled:opacity-50">
+            <button onClick={guardar} disabled={guardando} className="rounded-2xl bg-[#007334] px-5 py-3.5 text-base font-bold sm:rounded-full sm:py-2 sm:text-sm sm:font-semibold text-white hover:bg-[#005c29] disabled:opacity-50">
               {guardando ? 'Guardando…' : 'Guardar'}
             </button>
           </div>
@@ -833,7 +877,7 @@ export default function AdminSaelistas() {
       )}
 
       {aviso && (
-        <div className="fixed bottom-6 left-1/2 z-50 -translate-x-1/2 rounded-full bg-ink px-5 py-2.5 text-sm font-semibold text-white shadow-lg">
+        <div className="fixed bottom-24 left-1/2 z-50 md:bottom-6 -translate-x-1/2 rounded-full bg-ink px-5 py-2.5 text-sm font-semibold text-white shadow-lg">
           {aviso}
         </div>
       )}

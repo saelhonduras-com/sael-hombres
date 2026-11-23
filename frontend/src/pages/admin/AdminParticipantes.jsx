@@ -7,6 +7,7 @@ import {
   ZONAS_FIHNEC, nombreZona,
   ZONAS_POR_DEPARTAMENTO,
   CARGOS_FIHNEC,
+  soloDigitosDni, formatoDniEscribiendo,
   ESTADOS_CIVILES,
 } from '../../listas';
 import SelectorFecha from '../../components/SelectorFecha';
@@ -53,7 +54,7 @@ function fechaDMA(fechaISO) {
 }
 
 const claseInput = 'w-full rounded-lg border border-ink/15 px-3 py-2 text-sm focus:border-ember focus:outline-none';
-const claseFiltro = 'w-48 rounded-lg border border-ink/15 px-3 py-1.5 text-xs focus:border-ember focus:outline-none';
+const claseFiltro = 'w-full sm:w-48 rounded-lg border border-ink/15 px-3 py-1.5 text-xs focus:border-ember focus:outline-none';
 
 // Pestañas tipo control segmentado (cápsula con la activa rellena).
 const segContenedor = 'inline-flex flex-wrap gap-0.5 rounded-xl border border-night/15 bg-white p-1';
@@ -64,6 +65,26 @@ function claseSeg(activa) {
 // Muestra siempre el tipo y el número: "DNI: …", "Pasaporte: …" o "Código interno: …".
 function textoIdentificacion(tipo, numero) {
   return tipo ? `${tipo}: ${numero}` : numero;
+}
+
+// Reglas de la identificación al EDITAR, según el tipo que ya tiene la persona.
+// Devuelve un mensaje de error ('' si está bien o si no se está cambiando).
+function errorIdentificacion(tipo, valor) {
+  const v = (valor || '').trim();
+  if (!v) return '';
+  if (tipo === 'Pasaporte') {
+    return /^[A-Z0-9]{5,20}$/.test(v) ? '' : 'Pasaporte: letras y números, de 5 a 20 caracteres.';
+  }
+  if (v.length < 13) return `Faltan ${13 - v.length} dígito${13 - v.length === 1 ? '' : 's'} (el DNI tiene 13).`;
+  if (/^(\d)\1{12}$/.test(v) || v.startsWith('0000') || '01234567890123456789'.includes(v) || '98765432109876543210'.includes(v)) {
+    return 'Ese DNI no parece real. Revisa los dígitos.';
+  }
+  return '';
+}
+
+// "0801199012345" → "0801-1990-12345"
+function formatoDni(v) {
+  return /^\d{13}$/.test(v || '') ? `${v.slice(0, 4)}-${v.slice(4, 8)}-${v.slice(8)}` : v;
 }
 
 // Botones de acción en filas de tabla y en el detalle. Paleta a propósito:
@@ -95,6 +116,7 @@ export default function AdminParticipantes() {
   const [totalesTodos, setTotalesTodos] = useState(null); // { total, nacionales, extranjeros, menores } — generales, sin filtros
 
   const [filtros, setFiltros] = useState(filtrosVacios);
+  const [filtrosAbiertos, setFiltrosAbiertos] = useState(false); // solo aplica en celular
   const filtrosRef = useRef(filtros);
   useEffect(() => { filtrosRef.current = filtros; }, [filtros]);
 
@@ -123,6 +145,9 @@ export default function AdminParticipantes() {
   const [baseCumple, setBaseCumple] = useState([]);
   const [eventosAbiertos, setEventosAbiertos] = useState([]);
   const [guardando, setGuardando] = useState(false);
+  const [avisoGuardado, setAvisoGuardado] = useState(''); // mensaje de éxito tras guardar la ficha
+  const [confirmIdent, setConfirmIdent] = useState(null); // { tipo, anterior, nueva } | null
+  const [duplicadoIdent, setDuplicadoIdent] = useState(null); // { id, nombre, mensaje } | null
 
   const [estadisticas, setEstadisticas] = useState(null);
   const [eventoActual, setEventoActual] = useState(null);
@@ -131,6 +156,8 @@ export default function AdminParticipantes() {
   const [cobrando, setCobrando] = useState(null); // { inscripcion, cuentaId, banco_o_recibo, observaciones_pago } | null
   const [opcionesInscripcion, setOpcionesInscripcion] = useState([]); // las 3 cuentas: boletos_evento, boletos_bancos, cortesia
   const [guardandoCobro, setGuardandoCobro] = useState(false);
+  // Resultado del registro/cobro — SIEMPRE se muestra un modal (confirmado, cancelado o con error).
+  const [resultadoCobro, setResultadoCobro] = useState(null); // { tipo: 'ok'|'cancelado'|'error', nombre, detalle } | null
 
   const [error, setError] = useState('');
 
@@ -268,7 +295,7 @@ export default function AdminParticipantes() {
   // actualiza la lista localmente (ya tienes el botón "↻ Refrescar"
   // aparte, si necesitas que el Resumen del sidebar también se ponga
   // al día).
-  function pedirDesmarcar(inscripcion) {
+  function pedirDesmarcar(inscripcion, alTerminar) {
     pedirConfirmacion({
       mensaje: `Vas a desmarcar "Registrado" para ${inscripcion.nombre_completo}. Si tenía boleto asignado, se intentará devolver al contador (solo si era el último entregado — si no, el número queda anulado). Su información de pago deja de contar en Control de Ingresos. ¿Confirmas?`,
       textoConfirmar: 'Sí, desmarcar',
@@ -279,8 +306,9 @@ export default function AdminParticipantes() {
           setInscripcionesActual((prev) => prev.map((i) =>
             i.inscripcion_id === inscripcion.inscripcion_id ? { ...i, registrado_presencial: false } : i
           ));
-          setRegistradosActual((prev) => prev - 1);
+          if (!inscripcion.evento_id || Number(inscripcion.evento_id) === Number(eventoActual?.id)) setRegistradosActual((prev) => prev - 1);
           refrescarResumen();
+          if (alTerminar) await alTerminar();
         } catch (err) {
           setError(mensajeError(err));
         }
@@ -300,13 +328,14 @@ export default function AdminParticipantes() {
       cuentaId: '', // '' = sin seleccionar (opcional)
       banco_o_recibo: '',
       observaciones_pago: '',
+      alTerminar: inscripcion.alTerminar || null, // p. ej. recargar la ficha si se registró desde ahí
     });
     try {
       // Las 4 opciones vienen directo del Catálogo de Cuentas, buscadas
       // por su clave interna (no por nombre/código, que son libres de
       // editar): boletos_evento (4.1.1), boletos_bancos (4.1.2),
       // cortesia (4.1.4), y boletos_tarjeta (4.1.5).
-      const { data: cuentas } = await api.get(`/admin/eventos/${eventoActual.id}/valores-cuenta`, { params: { tipo: 'ingreso' } });
+      const { data: cuentas } = await api.get(`/admin/eventos/${inscripcion.evento_id || eventoActual.id}/valores-cuenta`, { params: { tipo: 'ingreso' } });
       const claves = ['boletos_evento', 'boletos_bancos', 'boletos_tarjeta', 'cortesia'];
       const opciones = claves
         .map((clave) => cuentas.find((c) => c.clave_sistema === clave))
@@ -347,15 +376,23 @@ export default function AdminParticipantes() {
         banco_o_recibo: opcion.pideBanco ? cobrando.banco_o_recibo : null,
         observaciones_pago: cobrando.observaciones_pago,
       });
+      const alTerminar = cobrando.alTerminar;
+      const nombreRegistrado = cobrando.inscripcion.nombre_completo;
       setCobrando(null);
       refrescarResumen();
+      setResultadoCobro({
+        tipo: 'ok',
+        nombre: nombreRegistrado,
+        detalle: opcion.monto > 0 ? `${opcion.nombre} · Cobrado: L. ${opcion.monto}` : `${opcion.nombre} · Sin cobro`,
+      });
+      if (alTerminar) await alTerminar();
       // Se limpia el filtro de búsqueda y se recarga la lista completa —
       // así el que se acaba de registrar ya aparece al final (los
       // registrados quedan siempre al fondo, ordenados por el backend).
       setBuscarActual('');
       cargarInscripcionesEventoActual('');
     } catch (err) {
-      setError(mensajeError(err));
+      setResultadoCobro({ tipo: 'error', nombre: cobrando.inscripcion.nombre_completo, detalle: mensajeError(err) });
     } finally {
       setGuardandoCobro(false);
     }
@@ -465,7 +502,10 @@ export default function AdminParticipantes() {
   }
 
   function abrirEditar() {
+    setDuplicadoIdent(null);
     setFormEditar({
+      // Menor con código interno: el campo arranca vacío (solo se llena si se le pone un DNI real).
+      numero_identificacion: seleccionado.tipo_identificacion === 'Código interno' ? '' : (seleccionado.numero_identificacion || ''),
       nombre_completo: seleccionado.nombre_completo || '',
       fecha_nacimiento: seleccionado.fecha_nacimiento ? seleccionado.fecha_nacimiento.slice(0, 10) : '',
       telefono_movil: seleccionado.telefono_movil || '',
@@ -483,16 +523,56 @@ export default function AdminParticipantes() {
     setVista('editar');
   }
 
+  // ¿Se está cambiando la identificación en el formulario?
+  const identCambia = !!formEditar && !!seleccionado
+    && (formEditar.numero_identificacion || '').trim() !== ''
+    && formEditar.numero_identificacion.trim() !== seleccionado.numero_identificacion;
+  const errorIdentEditar = formEditar && seleccionado && identCambia
+    ? errorIdentificacion(seleccionado.tipo_identificacion, formEditar.numero_identificacion)
+    : '';
+
+  // Paso previo: si cambió la identificación, se pide confirmar viendo anterior → nueva.
+  async function pedirGuardarEdicion() {
+    if (identCambia && !errorIdentEditar) {
+      const base = {
+        tipo: seleccionado.tipo_identificacion === 'Pasaporte' ? 'Pasaporte' : 'DNI',
+        anterior: seleccionado.numero_identificacion,
+        nueva: formEditar.numero_identificacion.trim(),
+        duplicado: null,
+      };
+      // Se verifica ANTES de mostrar el modal: si ya existe, el modal avisa y no deja guardar.
+      try {
+        const { data } = await api.get('/admin/participantes/verificar-identificacion', {
+          params: { numero: base.nueva, excluir_id: seleccionado.id },
+        });
+        base.duplicado = data.duplicado;
+      } catch (err) {
+        setError(mensajeError(err));
+        return;
+      }
+      setConfirmIdent(base);
+    } else {
+      guardarEdicion();
+    }
+  }
+
   async function guardarEdicion() {
     setGuardando(true);
     setError('');
+    setDuplicadoIdent(null);
     try {
-      await api.put(`/admin/participantes/${seleccionado.id}`, formEditar);
+      const { data: respuesta } = await api.put(`/admin/participantes/${seleccionado.id}`, formEditar);
       await recargarDetalle(seleccionado.id);
       setVista('detalle');
       cargarParticipantes(filtrosRef.current, 1, true);
+      setAvisoGuardado(respuesta?.identificacion_cambiada
+        ? 'Cambios guardados. La identificación se actualizó y quedó en la bitácora.'
+        : 'Cambios guardados exitosamente.');
+      setTimeout(() => setAvisoGuardado(''), 3500);
     } catch (err) {
-      setError(mensajeError(err));
+      const dup = err?.response?.data?.duplicado;
+      if (dup) setDuplicadoIdent({ id: dup.id, nombre: dup.nombre, mensaje: err.response.data.error });
+      else setError(mensajeError(err));
     } finally {
       setGuardando(false);
     }
@@ -752,7 +832,7 @@ export default function AdminParticipantes() {
                         Finalizar evento
                       </button>
 
-                      <div className="flex min-w-[340px] items-center justify-between gap-5 rounded-xl bg-night px-6 py-2.5 text-white">
+                      <div className="hidden w-full items-center justify-between sm:flex sm:w-auto sm:min-w-[340px] gap-5 rounded-xl bg-night px-6 py-2.5 text-white">
                         <div>
                           <p className="text-[10px] uppercase tracking-wide text-white/60">Evento actual</p>
                           <p className="font-display text-base font-bold leading-tight">{eventoActual.nombre}</p>
@@ -765,8 +845,39 @@ export default function AdminParticipantes() {
                     </div>
 
                     {cargandoActual ? <p className="mt-6 text-ink/40">Cargando…</p> : (
-                      <div className="mt-3 overflow-x-auto rounded-2xl border border-ink/10 bg-white shadow-sm">
-                        <table className="w-full text-sm">
+                      <div className="mt-3 overflow-x-auto rounded-2xl sm:border sm:border-ink/10 sm:bg-white sm:shadow-sm">
+                        {/* ===== Celular: tarjetas con botón grande ===== */}
+                        <div className="space-y-3 sm:hidden">
+                          {inscripcionesActual.length === 0 && (
+                            <p className="rounded-2xl bg-white p-5 text-center text-sm text-ink/40">Nadie se ha inscrito todavía a este evento.</p>
+                          )}
+                          {inscripcionesActual.slice((paginaActualSegura - 1) * porPaginaActual, paginaActualSegura * porPaginaActual).map((i) => (
+                            <div key={i.inscripcion_id} className="rounded-2xl border border-ink/10 bg-white p-4 shadow-sm">
+                              <p className="font-display text-base font-bold text-ink">
+                                {i.nombre_completo}
+                                {i.tipo_participante === 'extranjero' && <span className="ml-2 rounded-full bg-night/10 px-2 py-0.5 text-xs font-semibold text-night">Extranjero</span>}
+                                {i.tipo_participante === 'menor' && <span className="ml-2 rounded-full bg-gold/30 px-2 py-0.5 text-xs font-semibold text-night">Menor</span>}
+                                {idsCumpleaneros.has(i.participante_id) && <span title="Cumple años durante el evento" className="ml-2">🎂</span>}
+                              </p>
+                              <p className="mt-0.5 text-sm text-ink/60">
+                                {i.tipo_identificacion === 'DNI' ? formatoDni(i.numero_identificacion) : textoIdentificacion(i.tipo_identificacion, i.numero_identificacion)}
+                                {i.capitulo ? ` · ${i.capitulo}` : ''}{i.zona ? ` · ${nombreZona(i.zona)}` : ''}
+                              </p>
+                              <div className="mt-3 flex gap-2">
+                                {i.registrado_presencial ? (
+                                  <button onClick={() => pedirDesmarcar(i)} className="flex-1 rounded-xl bg-[#007334]/10 py-3 text-base font-semibold text-[#007334]">✓ Registrado</button>
+                                ) : (
+                                  <button onClick={() => abrirCobro(i)} className="flex-1 rounded-xl bg-[#007334] py-3 text-base font-semibold text-white active:bg-[#005c29]">Registrar y cobrar</button>
+                                )}
+                                <button onClick={() => abrirDetalle(i.participante_id)} className="rounded-xl border-2 border-night px-5 py-3 text-base font-semibold text-night">Ver</button>
+                                {!i.registrado_presencial && (
+                                  <button onClick={() => eliminarInscripcion(i.inscripcion_id, i.registrado_presencial)} aria-label="Eliminar inscripción" className="rounded-xl border border-ember/40 bg-ember/10 px-4 py-3 text-base text-ember">🗑</button>
+                                )}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                        <table className="hidden w-full text-sm sm:table">
                           <thead>
                             <tr className="border-b border-ink/10 bg-[#1F3464]/12 text-left text-xs uppercase tracking-wide text-[#1F3464]">
                               <th className="px-4 py-3">Nombre</th>
@@ -969,6 +1080,13 @@ export default function AdminParticipantes() {
                       placeholder="Buscar por nombre o identificación"
                       className={`${claseInput} min-w-[220px] flex-1 py-1.5`}
                     />
+                    <button
+                      type="button"
+                      onClick={() => setFiltrosAbiertos((v) => !v)}
+                      className="shrink-0 rounded-[10px] border border-night px-4 py-2 text-sm font-semibold text-night sm:hidden"
+                    >
+                      Filtros{[filtros.departamento, filtros.zona, filtros.tipo_participante].filter(Boolean).length > 0 ? ` (${[filtros.departamento, filtros.zona, filtros.tipo_participante].filter(Boolean).length})` : ''}
+                    </button>
                     {totalesTodos && (
                       <div className="flex shrink-0 items-stretch overflow-hidden rounded-xl bg-night text-white" title="Totales generales: no cambian con la búsqueda ni los filtros">
                         {[
@@ -985,7 +1103,23 @@ export default function AdminParticipantes() {
                       </div>
                     )}
                   </div>
+                  <div className="mt-2 flex flex-wrap gap-1.5 sm:hidden">
+                    {[
+                      ['departamento', filtros.departamento],
+                      ['zona', filtros.zona ? nombreZona(filtros.zona) : ''],
+                      ['tipo_participante', TIPOS_PARTICIPANTE.find((t) => t.value === filtros.tipo_participante && t.value)?.label || ''],
+                    ].filter(([, v]) => v).map(([k, v]) => (
+                      <button
+                        key={k} type="button"
+                        onClick={() => { const nuevos = { ...filtros, [k]: '' }; setFiltros(nuevos); cargarParticipantes(nuevos, 1, true); }}
+                        className="inline-flex items-center gap-1 rounded-full bg-night/10 px-2.5 py-1 text-xs font-semibold text-night"
+                      >
+                        {v} ✕
+                      </button>
+                    ))}
+                  </div>
                   <div className="mt-2 flex flex-wrap items-center gap-2">
+                    <div className={`${filtrosAbiertos ? 'flex' : 'hidden'} w-full flex-col gap-2 sm:contents`}>
                     <select value={filtros.departamento} onChange={(e) => setFiltros((f) => ({ ...f, departamento: e.target.value }))} className={claseFiltro}>
                       <option value="">Todos los departamentos</option>
                       {DEPARTAMENTOS_HONDURAS.map((d) => <option key={d} value={d}>{d}</option>)}
@@ -997,6 +1131,7 @@ export default function AdminParticipantes() {
                     <select value={filtros.tipo_participante} onChange={(e) => setFiltros((f) => ({ ...f, tipo_participante: e.target.value }))} className={claseFiltro}>
                       {TIPOS_PARTICIPANTE.map((t) => <option key={t.value} value={t.value}>{t.label}</option>)}
                     </select>
+                    </div>
                     <button type="submit" className="ml-auto rounded-full bg-[#007334] px-4 py-1.5 text-xs font-semibold text-white hover:bg-[#005c29]">
                       Buscar
                     </button>
@@ -1166,7 +1301,11 @@ export default function AdminParticipantes() {
                         <input
                           type="checkbox"
                           checked={i.registrado_presencial}
-                          onChange={(e) => marcarPresencial(i.id, e.target.checked)}
+                          onChange={(e) => {
+                            const ficha = { inscripcion_id: i.id, nombre_completo: seleccionado.nombre_completo, participante_id: seleccionado.id, evento_id: i.evento_id, alTerminar: () => recargarDetalle(seleccionado.id) };
+                            if (e.target.checked) abrirCobro(ficha);
+                            else pedirDesmarcar(ficha, () => recargarDetalle(seleccionado.id));
+                          }}
                         />
                         Registrado presencial
                       </label>
@@ -1176,14 +1315,73 @@ export default function AdminParticipantes() {
               )}
             </div>
           </div>
+
+          {seleccionado.bitacora_identificacion?.length > 0 && (
+            <div className="mt-5 border-t border-ink/10 pt-5">
+              <h3 className="font-display text-sm font-bold text-night">Historial de cambios de identificación</h3>
+              <ul className="mt-2 space-y-2">
+                {seleccionado.bitacora_identificacion.map((b) => (
+                  <li key={b.id} className="rounded-lg bg-ink/5 px-3 py-2 text-sm text-ink/70">
+                    <span className="font-mono text-ink/50 line-through">{formatoDni(b.identificacion_anterior)}</span>
+                    <span className="mx-2 text-ink/40">→</span>
+                    <span className="font-mono font-semibold text-ink">{formatoDni(b.identificacion_nueva)}</span>
+                    <span className="mt-0.5 block text-xs text-ink/50">
+                      {new Date(b.creado_en).toLocaleString('es-HN', { dateStyle: 'medium', timeStyle: 'short' })} · por {b.usuario_nombre}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
         </div>
       )}
 
       {vista === 'editar' && formEditar && (
-        <div className="mx-auto mt-4 max-w-2xl rounded-2xl border border-ink/10 bg-white p-6 shadow-sm">
+        <div className="mx-auto mt-4 max-w-2xl rounded-2xl border border-ink/10 bg-white p-6 pb-24 sm:pb-6 shadow-sm">
           <h2 className="font-display text-lg font-bold text-ink">Editar participante</h2>
           <div className="mt-4 grid gap-4 sm:grid-cols-2">
-            <label className="sm:col-span-2">
+            <div>
+              <span className="mb-1 block text-xs font-semibold text-ink/60">
+                {seleccionado.tipo_identificacion === 'Pasaporte' ? 'Pasaporte' : seleccionado.tipo_identificacion === 'Código interno' ? 'Identificación (menor)' : 'DNI'}
+              </span>
+              {seleccionado.tipo_identificacion === 'Código interno' && (
+                <p className="mb-2 rounded-lg bg-ink/5 px-3 py-2 text-xs text-ink/60">
+                  Código del sistema: <span className="font-mono font-bold text-ink">{seleccionado.numero_identificacion}</span> (se mantiene).
+                  Si el menor ya tiene DNI, escríbelo abajo para reemplazarlo.
+                </p>
+              )}
+              <input
+                type="text"
+                inputMode={seleccionado.tipo_identificacion === 'Pasaporte' ? 'text' : 'numeric'}
+                maxLength={seleccionado.tipo_identificacion === 'Pasaporte' ? 20 : 17}
+                placeholder={seleccionado.tipo_identificacion === 'Código interno' ? 'Opcional: DNI de 13 dígitos' : ''}
+                value={seleccionado.tipo_identificacion === 'Pasaporte' ? formEditar.numero_identificacion : formatoDniEscribiendo(formEditar.numero_identificacion)}
+                onChange={(e) => {
+                  setDuplicadoIdent(null);
+                  const v = seleccionado.tipo_identificacion === 'Pasaporte'
+                    ? e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 20)
+                    : soloDigitosDni(e.target.value);
+                  setFormEditar((f) => ({ ...f, numero_identificacion: v }));
+                }}
+                className={`${claseInput} font-bold ${errorIdentEditar || duplicadoIdent ? 'border-ember' : ''}`}
+              />
+              {seleccionado.tipo_identificacion !== 'Pasaporte' && (formEditar.numero_identificacion || '').length > 0 && (
+                <p className="mt-1 text-xs text-ink/40">{formEditar.numero_identificacion.length} / 13 dígitos</p>
+              )}
+              {errorIdentEditar && <p className="mt-1 text-xs font-semibold text-ember">{errorIdentEditar}</p>}
+              {duplicadoIdent && (
+                <p className="mt-1 text-xs font-semibold text-ember">
+                  {duplicadoIdent.mensaje}{' '}
+                  <button type="button" onClick={() => { setDuplicadoIdent(null); abrirDetalle(duplicadoIdent.id); }} className="underline">
+                    Ver a {duplicadoIdent.nombre}
+                  </button>
+                </p>
+              )}
+              {identCambia && !errorIdentEditar && !duplicadoIdent && (
+                <p className="mt-1 text-xs text-ink/50">Al guardar se te pedirá confirmar el cambio y quedará registrado en la bitácora.</p>
+              )}
+            </div>
+            <label>
               <span className="mb-1 block text-xs font-semibold text-ink/60">Nombre completo</span>
               <input type="text" value={formEditar.nombre_completo} onChange={(e) => setFormEditar((f) => ({ ...f, nombre_completo: e.target.value }))} className={claseInput} />
             </label>
@@ -1261,9 +1459,9 @@ export default function AdminParticipantes() {
               <input type="text" value={formEditar.contacto_emergencia_telefono} onChange={(e) => setFormEditar((f) => ({ ...f, contacto_emergencia_telefono: e.target.value.replace(/\D/g, '').slice(0, 8) }))} className={claseInput} />
             </label>
           </div>
-          <div className="mt-6 flex justify-end gap-3">
-            <button onClick={() => setVista('detalle')} className="rounded-full border border-ink/20 px-5 py-2 text-sm font-semibold text-ink/70 hover:bg-ink/5">Cancelar</button>
-            <button onClick={guardarEdicion} disabled={guardando} className="rounded-full bg-ember px-5 py-2 text-sm font-semibold text-white hover:bg-ember-light disabled:opacity-50">
+          <div className="fixed inset-x-0 bottom-0 z-40 flex gap-3 border-t border-ink/10 bg-white p-3 shadow-[0_-4px_12px_rgba(0,0,0,0.08)] sm:static sm:z-auto sm:mt-6 sm:justify-end sm:border-0 sm:bg-transparent sm:p-0 sm:shadow-none [&>*:first-child]:flex-none [&>*:last-child]:flex-1 sm:[&>*:last-child]:flex-none">
+            <button onClick={() => setVista('detalle')} className="rounded-2xl border border-ink/20 px-5 py-3.5 text-base font-semibold text-ink/70 sm:rounded-full sm:py-2 sm:text-sm hover:bg-ink/5">Cancelar</button>
+            <button onClick={pedirGuardarEdicion} disabled={guardando || !!errorIdentEditar} className="rounded-2xl bg-ember px-5 py-3.5 text-base font-bold sm:rounded-full sm:py-2 sm:text-sm sm:font-semibold text-white hover:bg-ember-light disabled:opacity-50">
               {guardando ? 'Guardando…' : 'Guardar'}
             </button>
           </div>
@@ -1271,7 +1469,7 @@ export default function AdminParticipantes() {
       )}
 
       {vista === 'extranjero' && (
-        <div className="mx-auto mt-4 max-w-2xl rounded-2xl border border-ink/10 bg-white p-6 shadow-sm">
+        <div className="mx-auto mt-4 max-w-2xl rounded-2xl border border-ink/10 bg-white p-6 pb-24 sm:pb-6 shadow-sm">
           <h2 className="font-display text-lg font-bold text-ink">Agregar participante extranjero</h2>
           <p className="mt-1 text-xs text-ink/50">
             Solo el nombre, el número de pasaporte y el evento son obligatorios. Este registro queda inscrito
@@ -1368,9 +1566,9 @@ export default function AdminParticipantes() {
               <input type="text" value={formExtranjero.contacto_emergencia_telefono} onChange={(e) => setFormExtranjero((f) => ({ ...f, contacto_emergencia_telefono: e.target.value.replace(/\D/g, '').slice(0, 8) }))} className={claseInput} />
             </label>
           </div>
-          <div className="mt-6 flex justify-end gap-3">
-            <button onClick={() => setVista('lista')} className="rounded-full border border-ink/20 px-5 py-2 text-sm font-semibold text-ink/70 hover:bg-ink/5">Cancelar</button>
-            <button onClick={guardarExtranjero} disabled={guardando} className="rounded-full bg-ember px-5 py-2 text-sm font-semibold text-white hover:bg-ember-light disabled:opacity-50">
+          <div className="fixed inset-x-0 bottom-0 z-40 flex gap-3 border-t border-ink/10 bg-white p-3 shadow-[0_-4px_12px_rgba(0,0,0,0.08)] sm:static sm:z-auto sm:mt-6 sm:justify-end sm:border-0 sm:bg-transparent sm:p-0 sm:shadow-none [&>*:first-child]:flex-none [&>*:last-child]:flex-1 sm:[&>*:last-child]:flex-none">
+            <button onClick={() => setVista('lista')} className="rounded-2xl border border-ink/20 px-5 py-3.5 text-base font-semibold text-ink/70 sm:rounded-full sm:py-2 sm:text-sm hover:bg-ink/5">Cancelar</button>
+            <button onClick={guardarExtranjero} disabled={guardando} className="rounded-2xl bg-ember px-5 py-3.5 text-base font-bold sm:rounded-full sm:py-2 sm:text-sm sm:font-semibold text-white hover:bg-ember-light disabled:opacity-50">
               {guardando ? 'Guardando…' : 'Guardar e inscribir'}
             </button>
           </div>
@@ -1378,7 +1576,7 @@ export default function AdminParticipantes() {
       )}
 
       {vista === 'menor' && (
-        <div className="mx-auto mt-4 max-w-2xl rounded-2xl border border-ink/10 bg-white p-6 shadow-sm">
+        <div className="mx-auto mt-4 max-w-2xl rounded-2xl border border-ink/10 bg-white p-6 pb-24 sm:pb-6 shadow-sm">
           <h2 className="font-display text-lg font-bold text-ink">Agregar menor de edad</h2>
           <p className="mt-1 text-xs text-ink/50">
             Si el menor no tiene DNI, el sistema le asigna un código interno (MEN-00001…); si lo trae, anótalo.
@@ -1395,8 +1593,8 @@ export default function AdminParticipantes() {
             <label className="sm:col-span-2">
               <span className="mb-1 block text-xs font-semibold text-ink/60">DNI / número de identidad (opcional, 13 dígitos)</span>
               <input
-                type="text" inputMode="numeric" maxLength={13} value={formMenor.numero_identificacion}
-                onChange={(e) => setFormMenor((f) => ({ ...f, numero_identificacion: e.target.value.replace(/\D/g, '').slice(0, 13) }))}
+                type="text" inputMode="numeric" maxLength={17} value={formatoDniEscribiendo(formMenor.numero_identificacion)}
+                onChange={(e) => setFormMenor((f) => ({ ...f, numero_identificacion: soloDigitosDni(e.target.value) }))}
                 className={claseInput} placeholder="Si no lo trae, déjalo vacío y se le asigna un código MEN-"
               />
               <p className="mt-1 text-xs text-ink/40">Con DNI, el menor también podrá inscribirse solo desde el formulario público.</p>
@@ -1446,11 +1644,50 @@ export default function AdminParticipantes() {
               </select>
             </label>
           </div>
-          <div className="mt-6 flex justify-end gap-3">
-            <button onClick={() => setVista('lista')} className="rounded-full border border-ink/20 px-5 py-2 text-sm font-semibold text-ink/70 hover:bg-ink/5">Cancelar</button>
-            <button onClick={guardarMenor} disabled={guardando} className="rounded-full bg-ember px-5 py-2 text-sm font-semibold text-white hover:bg-ember-light disabled:opacity-50">
+          <div className="fixed inset-x-0 bottom-0 z-40 flex gap-3 border-t border-ink/10 bg-white p-3 shadow-[0_-4px_12px_rgba(0,0,0,0.08)] sm:static sm:z-auto sm:mt-6 sm:justify-end sm:border-0 sm:bg-transparent sm:p-0 sm:shadow-none [&>*:first-child]:flex-none [&>*:last-child]:flex-1 sm:[&>*:last-child]:flex-none">
+            <button onClick={() => setVista('lista')} className="rounded-2xl border border-ink/20 px-5 py-3.5 text-base font-semibold text-ink/70 sm:rounded-full sm:py-2 sm:text-sm hover:bg-ink/5">Cancelar</button>
+            <button onClick={guardarMenor} disabled={guardando} className="rounded-2xl bg-ember px-5 py-3.5 text-base font-bold sm:rounded-full sm:py-2 sm:text-sm sm:font-semibold text-white hover:bg-ember-light disabled:opacity-50">
               {guardando ? 'Guardando…' : 'Guardar e inscribir'}
             </button>
+          </div>
+        </div>
+      )}
+
+      {avisoGuardado && (
+        <div className="fixed inset-x-4 bottom-24 z-[60] md:bottom-6 mx-auto flex max-w-md items-center gap-3 rounded-2xl bg-[#007334] px-5 py-3.5 text-sm font-semibold text-white shadow-lg">
+          <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-white/20 text-base">✓</span>
+          <span>{avisoGuardado}</span>
+        </div>
+      )}
+
+      {confirmIdent && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink/40 px-4">
+          <div className="w-full max-w-sm rounded-2xl bg-white p-6 shadow-lg">
+            <h3 className="font-display text-lg font-bold text-ink">
+              {confirmIdent.duplicado ? `Este ${confirmIdent.tipo} ya existe` : '¿Cambiar la identificación?'}
+            </h3>
+            <p className="mt-1 text-sm text-ink/60">{seleccionado?.nombre_completo}</p>
+            <div className="mt-4 space-y-2 rounded-xl bg-ink/5 p-3 text-sm">
+              <p><span className="text-xs text-ink/50">Antes</span><br /><span className="font-mono text-ink/60 line-through">{formatoDni(confirmIdent.anterior)}</span></p>
+              <p><span className="text-xs text-ink/50">Después</span><br /><span className="font-mono text-base font-bold text-ink">{formatoDni(confirmIdent.nueva)}</span></p>
+            </div>
+            {confirmIdent.duplicado ? (
+              <div className="mt-3 rounded-xl border border-ember/30 bg-ember/10 p-3 text-sm text-ember">
+                <p className="font-semibold">Duplicado: este {confirmIdent.tipo} ya pertenece a</p>
+                <p className="mt-0.5 text-base font-bold">{confirmIdent.duplicado.nombre}</p>
+                <p className="mt-1 text-xs text-ember/80">No se puede guardar el cambio. Revisa el número o corrige primero el otro registro.</p>
+              </div>
+            ) : (
+              <p className="mt-3 text-xs text-ink/50">Quedará registrado en la bitácora con tu nombre, la fecha y la hora.</p>
+            )}
+            <div className="mt-5 flex justify-end gap-3">
+              <button onClick={() => setConfirmIdent(null)} className="rounded-full border border-ink/20 px-4 py-1.5 text-sm font-semibold text-ink/70 hover:bg-ink/5">Revisar</button>
+              {confirmIdent.duplicado ? (
+                <button onClick={() => { const id = confirmIdent.duplicado.id; setConfirmIdent(null); abrirDetalle(id); }} className="rounded-full bg-night px-4 py-1.5 text-sm font-semibold text-white hover:opacity-90">Ver a {confirmIdent.duplicado.nombre.split(' ')[0]}</button>
+              ) : (
+                <button onClick={() => { setConfirmIdent(null); guardarEdicion(); }} className="rounded-full bg-ember px-4 py-1.5 text-sm font-semibold text-white hover:bg-ember-light">Sí, cambiar y guardar</button>
+              )}
+            </div>
           </div>
         </div>
       )}
@@ -1488,8 +1725,9 @@ export default function AdminParticipantes() {
       )}
 
       {cobrando && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink/40 px-4">
-          <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-lg">
+        <div className="fixed inset-0 z-50 flex items-end justify-center bg-ink/40 sm:items-center sm:px-4">
+          <div className="max-h-[92vh] w-full overflow-y-auto rounded-t-2xl bg-white p-5 shadow-lg sm:max-w-md sm:rounded-2xl sm:p-6">
+            <div className="mx-auto mb-3 h-1 w-10 rounded-full bg-ink/20 sm:hidden" />
             <h3 className="font-display text-lg font-bold text-ink">Módulo de cobro</h3>
             <p className="mt-1 text-sm text-ink/50">{cobrando.inscripcion.nombre_completo}</p>
             <p className="mt-1 text-xs text-ink/40">
@@ -1498,12 +1736,29 @@ export default function AdminParticipantes() {
             {error && <p className="mt-3 rounded-lg bg-ember/10 p-3 text-sm text-ember">{error}</p>}
 
             <div className="mt-4 space-y-4">
-              <label>
+              <div>
                 <span className="mb-1 block text-xs font-semibold text-ink/60">Inscripciones (Alimentación)</span>
+                {/* Celular: opciones grandes, fáciles de tocar */}
+                <div className="space-y-2 sm:hidden">
+                  {opcionesInscripcion.map((o) => {
+                    const sel = String(cobrando.cuentaId) === String(o.cuenta_id);
+                    return (
+                      <button
+                        key={o.cuenta_id} type="button"
+                        onClick={() => setCobrando((c) => ({ ...c, cuentaId: o.cuenta_id }))}
+                        className={`flex w-full items-center justify-between rounded-xl border-2 px-4 py-3.5 text-left text-base font-semibold ${sel ? 'border-[#007334] bg-[#007334]/10 text-[#007334]' : 'border-ink/15 text-night'}`}
+                      >
+                        <span>{sel ? '✓ ' : ''}{o.nombre}</span>
+                        <span>L. {o.monto}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+                {/* PC: lista desplegable, igual que antes */}
                 <select
                   value={cobrando.cuentaId}
                   onChange={(e) => setCobrando((c) => ({ ...c, cuentaId: e.target.value }))}
-                  className={claseInput}
+                  className={`${claseInput} hidden sm:block`}
                 >
                   <option value="">Seleccionar…</option>
                   {opcionesInscripcion.map((o) => (
@@ -1513,13 +1768,13 @@ export default function AdminParticipantes() {
                 {opcionesInscripcion.length === 0 && (
                   <p className="mt-1 text-xs text-ember">No hay cuentas de boletos ni Cortesía configuradas — ajústalas en Entradas de Efectivo.</p>
                 )}
-              </label>
+              </div>
 
               {(() => {
                 const opcionElegida = opcionesInscripcion.find((o) => String(o.cuenta_id) === String(cobrando.cuentaId));
                 const pideBanco = opcionElegida?.pideBanco;
                 return (
-                  <label>
+                  <label className="block">
                     <span className="mb-1 block text-xs font-semibold text-ink/60">Banco ó # de recibo</span>
                     <input
                       type="text" value={pideBanco ? cobrando.banco_o_recibo : ''}
@@ -1532,20 +1787,62 @@ export default function AdminParticipantes() {
                 );
               })()}
 
-              <label>
+              <label className="block">
                 <span className="mb-1 block text-xs font-semibold text-ink/60">Observaciones</span>
                 <input type="text" value={cobrando.observaciones_pago} onChange={(e) => setCobrando((c) => ({ ...c, observaciones_pago: e.target.value }))} className={claseInput} />
               </label>
             </div>
 
-            <div className="mt-6 flex justify-end gap-3">
-              <button onClick={() => setCobrando(null)} className="rounded-full border border-ink/20 px-4 py-1.5 text-sm font-semibold text-ink/70 hover:bg-ink/5">
-                Cancelar
-              </button>
-              <button onClick={guardarCobro} disabled={guardandoCobro} className="rounded-full bg-[#007334] px-4 py-1.5 text-sm font-semibold text-white hover:bg-[#005c29] disabled:opacity-50">
-                {guardandoCobro ? 'Guardando…' : 'Guardar y confirmar'}
-              </button>
+            {(() => {
+              const op = opcionesInscripcion.find((o) => String(o.cuenta_id) === String(cobrando.cuentaId));
+              return (
+                <div className="mt-6 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end sm:gap-3">
+                  <button
+                    onClick={() => { setResultadoCobro({ tipo: 'cancelado', nombre: cobrando.inscripcion.nombre_completo }); setCobrando(null); setError(''); }}
+                    className="rounded-full border border-ink/20 px-4 py-2.5 text-sm font-semibold text-ink/70 hover:bg-ink/5 sm:py-1.5"
+                  >
+                    Cancelar
+                  </button>
+                  <button onClick={guardarCobro} disabled={guardandoCobro} className="rounded-full bg-[#007334] px-4 py-3.5 text-base font-semibold text-white hover:bg-[#005c29] disabled:opacity-50 sm:py-1.5 sm:text-sm">
+                    {guardandoCobro ? 'Guardando…' : (
+                      <>
+                        <span className="sm:hidden">{op ? (op.monto > 0 ? `Cobrar L. ${op.monto} y registrar` : 'Registrar sin cobro') : 'Elige una opción'}</span>
+                        <span className="hidden sm:inline">Guardar y confirmar</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+              );
+            })()}
+          </div>
+        </div>
+      )}
+
+      {resultadoCobro && (
+        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-ink/50 px-4">
+          <div className="w-full max-w-sm rounded-2xl bg-white p-6 text-center shadow-lg">
+            <div className={`mx-auto flex h-16 w-16 items-center justify-center rounded-full text-3xl font-bold text-white ${resultadoCobro.tipo === 'ok' ? 'bg-[#007334]' : resultadoCobro.tipo === 'cancelado' ? 'bg-ember' : 'bg-[#F59D24]'}`}>
+              {resultadoCobro.tipo === 'ok' ? '✓' : resultadoCobro.tipo === 'cancelado' ? '✕' : '!'}
             </div>
+            <h3 className="mt-4 font-display text-xl font-bold text-ink">
+              {resultadoCobro.tipo === 'ok' ? 'Registro confirmado' : resultadoCobro.tipo === 'cancelado' ? 'Registro cancelado' : 'No se pudo guardar'}
+            </h3>
+            <p className="mt-2 text-sm text-ink/60">
+              {resultadoCobro.tipo === 'ok' && `${resultadoCobro.nombre} quedó registrado.`}
+              {resultadoCobro.tipo === 'cancelado' && `No se cobró nada. ${resultadoCobro.nombre} sigue sin registrar.`}
+              {resultadoCobro.tipo === 'error' && `No se registró el cobro de ${resultadoCobro.nombre}. ${resultadoCobro.detalle || ''}`}
+            </p>
+            {resultadoCobro.tipo === 'ok' && resultadoCobro.detalle && (
+              <p className="mt-3 rounded-xl bg-parchment px-3 py-2 text-sm font-semibold text-ink">{resultadoCobro.detalle}</p>
+            )}
+            {resultadoCobro.tipo === 'error' ? (
+              <div className="mt-5 space-y-2">
+                <button autoFocus onClick={() => { setResultadoCobro(null); guardarCobro(); }} className="w-full rounded-xl bg-ember py-3 text-base font-semibold text-white">Reintentar</button>
+                <button onClick={() => setResultadoCobro(null)} className="w-full py-2 text-sm text-ink/60">Cerrar</button>
+              </div>
+            ) : (
+              <button autoFocus onClick={() => setResultadoCobro(null)} className={`mt-5 w-full rounded-xl py-3 text-base font-semibold text-white ${resultadoCobro.tipo === 'ok' ? 'bg-[#007334]' : 'bg-night'}`}>Aceptar</button>
+            )}
           </div>
         </div>
       )}

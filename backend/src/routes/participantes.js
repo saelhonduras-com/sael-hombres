@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const pool = require('../db');
-const { requireAuth, requireModulo } = require('../middleware/auth');
+const { requireAuth, requireModulo, requireRole } = require('../middleware/auth');
 const xlsx = require('xlsx');
 const PDFDocument = require('pdfkit');
 const { pedidoEnMayusculas, aplicarMayusculas, mayusculasEnHoja } = require('../pdfMayusculas');
@@ -40,6 +40,35 @@ function validarFechaNacimiento(fecha) {
   // Hasta 100 años hacia atrás (mismo rango que ofrece el selector del formulario).
   const minimo = new Date(`${hoy.getFullYear() - 100}-01-01`);
   return d >= minimo && d <= hoy;
+}
+
+
+// Normaliza y valida una identificación NUEVA según el tipo que ya tiene el
+// participante (no se permite pasar de DNI a pasaporte ni al revés).
+// Devuelve { valor } o { error }.
+function validarIdentificacionNueva(tipoActual, crudo) {
+  const texto = String(crudo ?? '').trim();
+  if (tipoActual === 'Pasaporte') {
+    const v = texto.replace(/[\s-]/g, '').toUpperCase();
+    if (!validarPasaporte(v)) {
+      return { error: 'El pasaporte debe ser alfanumérico, de 5 a 20 caracteres.' };
+    }
+    return { valor: v, tipo: 'Pasaporte' };
+  }
+  // DNI, o menor con código interno que se reemplaza por un DNI real
+  const v = texto.replace(/[\s-]/g, '');
+  if (!/^\d+$/.test(v)) {
+    return { error: tipoActual === 'DNI'
+      ? 'El DNI solo puede tener números.'
+      : 'Para un menor solo se puede escribir un DNI de 13 dígitos (el código MEN- lo asigna el sistema).' };
+  }
+  if (!validarDni(v)) {
+    return { error: `El DNI debe tener exactamente 13 dígitos (tiene ${v.length}).` };
+  }
+  if (/^(\d)\1{12}$/.test(v) || v.startsWith('0000') || '01234567890123456789'.includes(v) || '98765432109876543210'.includes(v)) {
+    return { error: 'Ese DNI no parece real. Revisa los dígitos.' };
+  }
+  return { valor: v, tipo: 'DNI' };
 }
 
 // ============================================================
@@ -636,6 +665,25 @@ router.delete('/admin/inscripciones/:id', requireAuth, requireModulo('participan
   }
 });
 
+// Admin: ¿ya existe esta identificación en otro participante? (la usa el modal de
+// confirmación del cambio de DNI para avisar ANTES de guardar).
+router.get('/admin/participantes/verificar-identificacion', requireAuth, requireModulo('participantes', 'edicion'), async (req, res) => {
+  const { numero, excluir_id } = req.query;
+  try {
+    const p = await pool.query(`SELECT tipo_identificacion FROM participantes WHERE id = $1`, [excluir_id]);
+    if (p.rows.length === 0) return res.status(404).json({ error: 'Participante no encontrado.' });
+    const r = validarIdentificacionNueva(p.rows[0].tipo_identificacion, numero);
+    if (r.error) return res.status(400).json({ error: r.error });
+    const dup = await pool.query(
+      `SELECT id, nombre_completo FROM participantes WHERE numero_identificacion = $1 AND id <> $2`,
+      [r.valor, excluir_id]
+    );
+    res.json({ duplicado: dup.rows[0] ? { id: dup.rows[0].id, nombre: dup.rows[0].nombre_completo } : null });
+  } catch (err) {
+    res.status(500).json({ error: 'No se pudo verificar la identificación.' });
+  }
+});
+
 // Admin: detalle de un participante + historial de inscripciones + total de SAELES
 router.get('/admin/participantes/:id', requireAuth, requireModulo('participantes', 'consulta'), async (req, res) => {
   const { id } = req.params;
@@ -657,13 +705,19 @@ router.get('/admin/participantes/:id', requireAuth, requireModulo('participantes
     // igual que en SFL: el histórico previo (veces_saeles_previas) ya se asume confirmado.
     const confirmadas = inscripciones.rows.filter((i) => i.registrado_presencial).length;
     const total_saeles = (p.veces_saeles_previas || 0) + confirmadas;
-    res.json({ ...p, inscripciones: inscripciones.rows, total_saeles });
+    const bitacora = await pool.query(
+      `SELECT id, usuario_nombre, identificacion_anterior, identificacion_nueva, creado_en
+       FROM bitacora_identificacion WHERE participante_id = $1 ORDER BY creado_en DESC`,
+      [id]
+    ).then((r) => r.rows).catch(() => []);
+    res.json({ ...p, inscripciones: inscripciones.rows, total_saeles, bitacora_identificacion: bitacora });
   } catch (err) {
     res.status(500).json({ error: 'No se pudo obtener el detalle del participante.' });
   }
 });
 
-// Admin: edición de datos de un participante (no permite cambiar identificación ni tipo)
+// Admin: edición de datos de un participante. La identificación se puede corregir
+// (con reglas según el tipo y dejando registro en la bitácora); el tipo nunca cambia.
 router.put('/admin/participantes/:id', requireAuth, requireModulo('participantes', 'edicion'), async (req, res) => {
   const { id } = req.params;
   const {
@@ -671,6 +725,7 @@ router.put('/admin/participantes/:id', requireAuth, requireModulo('participantes
     departamento, municipio, capitulo, zona, cargo_fihnec, estado_civil,
     ha_recibido_saeles, veces_saeles_previas,
     contacto_emergencia_nombre, contacto_emergencia_telefono,
+    numero_identificacion,
   } = req.body;
 
   if (!nombre_completo) {
@@ -689,16 +744,52 @@ router.put('/admin/participantes/:id', requireAuth, requireModulo('participantes
     return res.status(400).json({ error: 'La cantidad de veces que ha recibido SAELES debe ser un número entre 0 y 99.' });
   }
 
+  const client = await pool.connect();
   try {
-    const { rows } = await pool.query(
+    await client.query('BEGIN');
+    const actual = await client.query(
+      `SELECT id, nombre_completo, tipo_identificacion, numero_identificacion FROM participantes WHERE id = $1 FOR UPDATE`,
+      [id]
+    );
+    if (actual.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Participante no encontrado.' });
+    }
+    const previo = actual.rows[0];
+
+    // ¿Cambió la identificación?
+    let cambioIdent = null; // { valor, tipo }
+    if (numero_identificacion !== undefined && String(numero_identificacion).trim() !== '' &&
+        String(numero_identificacion).trim() !== previo.numero_identificacion) {
+      const r = validarIdentificacionNueva(previo.tipo_identificacion, numero_identificacion);
+      if (r.error) {
+        await client.query('ROLLBACK');
+        return res.status(400).json({ error: r.error });
+      }
+      if (r.valor !== previo.numero_identificacion) {
+        const dup = await client.query(
+          `SELECT id, nombre_completo FROM participantes WHERE numero_identificacion = $1 AND id <> $2`,
+          [r.valor, id]
+        );
+        if (dup.rows.length > 0) {
+          await client.query('ROLLBACK');
+          return res.status(409).json({
+            error: `Este ${r.tipo === 'DNI' ? 'DNI' : 'pasaporte'} ya pertenece a ${dup.rows[0].nombre_completo}.`,
+            duplicado: { id: dup.rows[0].id, nombre: dup.rows[0].nombre_completo },
+          });
+        }
+        cambioIdent = r;
+      }
+    }
+
+    await client.query(
       `UPDATE participantes SET
         nombre_completo = $1, fecha_nacimiento = $2, telefono_movil = $3,
         departamento = $4, municipio = $5, capitulo = $6, zona = $7,
         cargo_fihnec = $8, estado_civil = $9,
         ha_recibido_saeles = $10, veces_saeles_previas = $11,
         contacto_emergencia_nombre = $12, contacto_emergencia_telefono = $13
-      WHERE id = $14
-      RETURNING id`,
+      WHERE id = $14`,
       [
         nombre_completo, fecha_nacimiento || null, telefono_movil || null,
         departamento || null, municipio || null, capitulo || null, zona || null,
@@ -708,12 +799,59 @@ router.put('/admin/participantes/:id', requireAuth, requireModulo('participantes
         id,
       ]
     );
-    if (rows.length === 0) {
-      return res.status(404).json({ error: 'Participante no encontrado.' });
+
+    if (cambioIdent) {
+      await client.query(
+        `UPDATE participantes SET numero_identificacion = $1, tipo_identificacion = $2 WHERE id = $3`,
+        [cambioIdent.valor, cambioIdent.tipo, id]
+      );
+      await client.query(
+        `INSERT INTO bitacora_identificacion
+          (participante_id, participante_nombre, usuario_id, usuario_nombre,
+           tipo_identificacion_anterior, tipo_identificacion_nueva,
+           identificacion_anterior, identificacion_nueva)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
+        [id, nombre_completo, req.usuario.id || null, req.usuario.nombre_completo || req.usuario.email || 'Usuario',
+         previo.tipo_identificacion, cambioIdent.tipo, previo.numero_identificacion, cambioIdent.valor]
+      );
     }
-    res.json({ ok: true });
+    await client.query('COMMIT');
+    res.json({ ok: true, identificacion_cambiada: !!cambioIdent });
   } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
+    if (err.code === '23505') {
+      return res.status(409).json({ error: 'Esa identificación ya pertenece a otro participante.' });
+    }
     res.status(500).json({ error: 'No se pudo actualizar el participante.' });
+  } finally {
+    client.release();
+  }
+});
+
+// Admin (Super Admin): bitácora global de cambios de identificación, con filtros.
+router.get('/admin/bitacora-identificacion', requireAuth, requireRole('super_admin'), async (req, res) => {
+  const { desde, hasta, usuario, q } = req.query;
+  const cond = []; const vals = [];
+  if (desde) { vals.push(desde); cond.push(`creado_en >= ($${vals.length}::date)`); }
+  if (hasta) { vals.push(hasta); cond.push(`creado_en < ($${vals.length}::date + 1)`); }
+  if (usuario) { vals.push(`%${usuario}%`); cond.push(`usuario_nombre ILIKE $${vals.length}`); }
+  if (q) {
+    vals.push(`%${q}%`);
+    cond.push(`(participante_nombre ILIKE $${vals.length} OR identificacion_anterior ILIKE $${vals.length} OR identificacion_nueva ILIKE $${vals.length})`);
+  }
+  try {
+    const { rows } = await pool.query(
+      `SELECT id, participante_id, participante_nombre, usuario_nombre,
+              tipo_identificacion_anterior, tipo_identificacion_nueva,
+              identificacion_anterior, identificacion_nueva, creado_en
+       FROM bitacora_identificacion
+       ${cond.length ? 'WHERE ' + cond.join(' AND ') : ''}
+       ORDER BY creado_en DESC LIMIT 500`,
+      vals
+    );
+    res.json(rows);
+  } catch (err) {
+    res.status(500).json({ error: 'No se pudo obtener la bitácora.' });
   }
 });
 
@@ -1240,7 +1378,7 @@ async function obtenerFilasDiplomas(evento_id) {
      FROM inscripciones i
      JOIN participantes p ON p.id = i.participante_id
      WHERE i.evento_id = $1 AND i.registrado_presencial = true AND p.oculto = false
-     ORDER BY p.zona ASC, p.nombre_completo ASC`,
+     ORDER BY p.zona ASC, p.capitulo ASC, p.nombre_completo ASC`,
     [evento_id]
   );
   const conPrimeraVez = rows.map((r) => ({

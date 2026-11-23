@@ -16,6 +16,25 @@ export default function AdminMantenimiento() {
   const [confirmacion, setConfirmacion] = useState(null); // { item, onConfirmar } | null
   const [aviso, setAviso] = useState('');
 
+  // --- Bitácora de cambios de identificación ---
+  const [tab, setTab] = useState('sistema'); // 'sistema' | 'bitacora'
+  const [bitacora, setBitacora] = useState([]);
+  const [cargandoBit, setCargandoBit] = useState(false);
+  const [filtroBit, setFiltroBit] = useState({ desde: '', hasta: '', usuario: '', q: '' });
+
+  useEffect(() => {
+    if (tab !== 'bitacora' || rol !== 'super_admin') return undefined;
+    setCargandoBit(true);
+    const t = setTimeout(() => {
+      const params = Object.fromEntries(Object.entries(filtroBit).filter(([, v]) => v));
+      api.get('/admin/bitacora-identificacion', { params })
+        .then(({ data }) => setBitacora(data))
+        .catch((err) => setError(mensajeError(err)))
+        .finally(() => setCargandoBit(false));
+    }, 300);
+    return () => clearTimeout(t);
+  }, [tab, filtroBit, rol]);
+
   // --- Respaldo completo del sistema ---
   const [generandoRespaldo, setGenerandoRespaldo] = useState(false);
   const [archivoRespaldo, setArchivoRespaldo] = useState(null); // { nombre, contenido, resumen } | null
@@ -169,6 +188,69 @@ export default function AdminMantenimiento() {
 
       {error && <p className="mt-4 rounded-lg bg-ember/10 p-3 text-sm text-ember">{error}</p>}
 
+      <div className="mt-4 inline-flex gap-0.5 rounded-xl border border-night/15 bg-white p-1">
+        {[['sistema', 'Papelera y respaldos'], ['bitacora', 'Bitácora']].map(([k, t]) => (
+          <button key={k} onClick={() => setTab(k)}
+            className={`rounded-lg px-4 py-1.5 text-sm font-semibold ${tab === k ? 'bg-night text-white' : 'text-ink/60 hover:bg-ink/5'}`}>
+            {t}
+          </button>
+        ))}
+      </div>
+
+      {tab === 'bitacora' && (
+        <div className="mt-4 rounded-2xl border border-ink/10 bg-white shadow-sm">
+          <div className="border-b border-ink/10 px-5 py-4">
+            <h2 className="font-display text-lg font-bold text-ink">🧾 Bitácora de identificación</h2>
+            <p className="mt-1 text-sm text-ink/50">Cada cambio de DNI, pasaporte o código hecho desde Participantes › Editar: quién, cuándo y qué cambió.</p>
+            <div className="mt-3 grid gap-2 sm:grid-cols-4">
+              <label className="text-xs font-semibold text-ink/60">Desde
+                <input type="date" value={filtroBit.desde} onChange={(e) => setFiltroBit((f) => ({ ...f, desde: e.target.value }))} className="mt-1 w-full rounded-lg border border-ink/15 px-3 py-1.5 text-sm font-normal" />
+              </label>
+              <label className="text-xs font-semibold text-ink/60">Hasta
+                <input type="date" value={filtroBit.hasta} onChange={(e) => setFiltroBit((f) => ({ ...f, hasta: e.target.value }))} className="mt-1 w-full rounded-lg border border-ink/15 px-3 py-1.5 text-sm font-normal" />
+              </label>
+              <label className="text-xs font-semibold text-ink/60">Usuario
+                <input type="text" placeholder="Quién lo cambió" value={filtroBit.usuario} onChange={(e) => setFiltroBit((f) => ({ ...f, usuario: e.target.value }))} className="mt-1 w-full rounded-lg border border-ink/15 px-3 py-1.5 text-sm font-normal" />
+              </label>
+              <label className="text-xs font-semibold text-ink/60">Participante o DNI
+                <input type="text" placeholder="Nombre o número" value={filtroBit.q} onChange={(e) => setFiltroBit((f) => ({ ...f, q: e.target.value }))} className="mt-1 w-full rounded-lg border border-ink/15 px-3 py-1.5 text-sm font-normal" />
+              </label>
+            </div>
+          </div>
+          {cargandoBit ? (
+            <p className="p-5 text-sm text-ink/40">Cargando…</p>
+          ) : bitacora.length === 0 ? (
+            <p className="p-5 text-sm text-ink/40">No hay cambios de identificación registrados con esos filtros.</p>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-ink/10 bg-ink/5 text-left text-xs uppercase tracking-wide text-ink/50">
+                    <th className="px-5 py-3">Fecha</th>
+                    <th className="px-5 py-3">Usuario</th>
+                    <th className="px-5 py-3">Participante</th>
+                    <th className="px-5 py-3">Antes</th>
+                    <th className="px-5 py-3">Después</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {bitacora.map((b) => (
+                    <tr key={b.id} className="border-b border-ink/5 last:border-0">
+                      <td className="whitespace-nowrap px-5 py-3 text-ink/60">{formatoFecha(b.creado_en)}</td>
+                      <td className="px-5 py-3">{b.usuario_nombre}</td>
+                      <td className="px-5 py-3 font-medium text-ink">{b.participante_nombre}</td>
+                      <td className="px-5 py-3 font-mono text-ink/50 line-through">{b.identificacion_anterior}</td>
+                      <td className="px-5 py-3 font-mono font-semibold text-ink">{b.identificacion_nueva}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
+
+      {tab === 'sistema' && (<>
       <div className="mt-4 rounded-2xl border border-ink/10 bg-white shadow-sm">
         <div className="border-b border-ink/10 px-5 py-4">
           <h2 className="font-display text-lg font-bold text-ink">🗑️ Papelera</h2>
@@ -318,6 +400,8 @@ export default function AdminMantenimiento() {
         )}
       </div>
 
+      </>)}
+
       {confirmacion && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink/40 px-4">
           <div className="w-full max-w-sm rounded-2xl bg-white p-6 shadow-lg">
@@ -345,7 +429,7 @@ export default function AdminMantenimiento() {
       )}
 
       {aviso && (
-        <div className="fixed bottom-6 left-1/2 z-50 -translate-x-1/2 rounded-full bg-ink px-5 py-2.5 text-sm font-semibold text-white shadow-lg">
+        <div className="fixed bottom-24 left-1/2 z-50 md:bottom-6 -translate-x-1/2 rounded-full bg-ink px-5 py-2.5 text-sm font-semibold text-white shadow-lg">
           {aviso}
         </div>
       )}

@@ -40,6 +40,15 @@ export const MUNICIPIOS_POR_DEPARTAMENTO = {
   "Yoro": ["Arenal", "El Negrito", "El Progreso", "Jocon", "Morazan", "Olanchito", "Santa Rita", "Sulaco", "Victoria", "Yorito", "Yoro"]
 };
 
+// DNI al ESCRIBIR: 13 dígitos se muestran como 0801-1990-12345 (guiones solos
+// después del 4.º y 8.º dígito). Lo que se guarda y se envía son siempre los
+// 13 dígitos corridos; los guiones son solo para escribirlo y leerlo mejor.
+export const soloDigitosDni = (v) => String(v || '').replace(/\D/g, '').slice(0, 13);
+export const formatoDniEscribiendo = (v) => {
+  const d = soloDigitosDni(v);
+  return [d.slice(0, 4), d.slice(4, 8), d.slice(8)].filter(Boolean).join('-');
+};
+
 export const nombreZona = (z) => String(z || '').replace(/^Zona\s+/i, '');
 
 export const ZONAS_FIHNEC = [

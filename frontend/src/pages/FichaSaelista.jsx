@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import api, { mensajeError } from '../api';
 import {
   DEPARTAMENTOS_HONDURAS, MUNICIPIOS_POR_DEPARTAMENTO, ZONAS_FIHNEC, nombreZona,
-  CARGOS_FIHNEC, CARGOS_HISTORICO, ESTADOS_CIVILES,
+  CARGOS_FIHNEC, CARGOS_HISTORICO, ESTADOS_CIVILES, soloDigitosDni, formatoDniEscribiendo,
   TIPOS_TESTIMONIO, FORMACION_OFICIAL, OTRAS_PARTICIPACIONES,
 } from '../listas';
 
@@ -249,10 +249,10 @@ export default function FichaSaelista() {
               <label>
                 <span className="mb-1 block text-xs font-semibold text-ink/60">Tu número de identificación (DNI)</span>
                 <input
-                  type="text" inputMode="numeric" maxLength={13} value={dni}
-                  onChange={(e) => setDni(e.target.value.replace(/\D/g, ''))}
+                  type="text" inputMode="numeric" maxLength={17} value={formatoDniEscribiendo(dni)}
+                  onChange={(e) => setDni(soloDigitosDni(e.target.value))}
                   className="w-full rounded-lg border border-ink/15 bg-white px-3 py-3 text-center font-display text-2xl tracking-widest text-ink transition focus:border-ember focus:outline-none focus:ring-4 focus:ring-ember/10"
-                  placeholder="0801199012345"
+                  placeholder="0801-1990-12345"
                 />
                 <span className="mt-2 block text-center text-xs text-ink/40">{dni.length}/13 dígitos</span>
               </label>

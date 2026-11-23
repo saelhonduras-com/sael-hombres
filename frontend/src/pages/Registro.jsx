@@ -3,7 +3,7 @@ import { useNavigate, Link } from 'react-router-dom';
 import api, { mensajeError } from '../api';
 import {
   DEPARTAMENTOS_HONDURAS, MUNICIPIOS_POR_DEPARTAMENTO,
-  ZONAS_FIHNEC, nombreZona, ZONAS_POR_DEPARTAMENTO, CARGOS_FIHNEC, ESTADOS_CIVILES,
+  ZONAS_FIHNEC, nombreZona, soloDigitosDni, formatoDniEscribiendo, ZONAS_POR_DEPARTAMENTO, CARGOS_FIHNEC, ESTADOS_CIVILES,
 } from '../listas';
 import SelectorFecha from '../components/SelectorFecha';
 
@@ -38,7 +38,7 @@ function Boton({ children, variant = 'red', className = '', ...props }) {
     <button
       type="button"
       {...props}
-      className={`rounded-full px-6 py-2.5 text-sm font-semibold text-white transition hover:-translate-y-0.5 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ink/40 disabled:pointer-events-none disabled:translate-y-0 disabled:cursor-not-allowed disabled:opacity-50 ${colores[variant]} ${className}`}
+      className={`rounded-2xl px-6 py-3.5 text-base font-bold text-white transition sm:rounded-full sm:py-2.5 sm:text-sm sm:font-semibold sm:hover:-translate-y-0.5 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ink/40 disabled:pointer-events-none disabled:translate-y-0 disabled:cursor-not-allowed disabled:opacity-50 ${colores[variant]} ${className}`}
     >
       {children}
     </button>
@@ -50,10 +50,20 @@ function BotonSecundario({ children, className = '', ...props }) {
     <button
       type="button"
       {...props}
-      className={`rounded-full border border-ink/20 px-6 py-2.5 text-sm font-semibold text-ink/70 transition hover:bg-ink/5 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ink/40 ${className}`}
+      className={`rounded-2xl border border-ink/20 px-6 py-3.5 text-base font-semibold text-ink/70 transition hover:bg-ink/5 sm:rounded-full sm:py-2.5 sm:text-sm focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ink/40 ${className}`}
     >
       {children}
     </button>
+  );
+}
+
+// En celular los botones de navegación quedan fijos abajo (al alcance
+// del pulgar); desde sm: vuelven a su sitio normal dentro de la tarjeta.
+function BarraAcciones({ children, centrar = false }) {
+  return (
+    <div className={`fixed inset-x-0 bottom-0 z-40 flex gap-3 border-t border-ink/10 bg-white p-3 shadow-[0_-4px_12px_rgba(0,0,0,0.08)] sm:static sm:z-auto sm:border-0 sm:bg-transparent sm:p-0 sm:pt-2 sm:shadow-none ${centrar ? 'sm:justify-center' : 'sm:justify-between'} [&>*:last-child]:flex-1 sm:[&>*:last-child]:flex-none [&>*:first-child:not(:last-child)]:basis-28 [&>*:first-child:not(:last-child)]:flex-none sm:[&>*:first-child:not(:last-child)]:basis-auto`}>
+      {children}
+    </div>
   );
 }
 
@@ -98,7 +108,7 @@ function TarjetaMarca({ children, className = '' }) {
         <span className="flex-1 bg-[#FDC41F]" />
         <span className="flex-1 bg-[#007334]" />
       </div>
-      <div className="p-8">{children}</div>
+      <div className="p-5 pb-6 sm:p-8">{children}</div>
     </div>
   );
 }
@@ -106,7 +116,7 @@ function TarjetaMarca({ children, className = '' }) {
 function Campo({ etiqueta, children }) {
   return (
     <label className="block">
-      <span className="mb-1.5 block text-sm font-semibold text-ink/70">{etiqueta}</span>
+      <span className="mb-1.5 block text-sm font-semibold text-night sm:text-ink/70">{etiqueta}</span>
       {children}
     </label>
   );
@@ -119,13 +129,13 @@ function Campo({ etiqueta, children }) {
 function CampoGrupo({ etiqueta, children }) {
   return (
     <div className="block">
-      <span className="mb-1.5 block text-sm font-semibold text-ink/70">{etiqueta}</span>
+      <span className="mb-1.5 block text-sm font-semibold text-night sm:text-ink/70">{etiqueta}</span>
       {children}
     </div>
   );
 }
 
-const claseInput = 'w-full rounded-lg border border-ink/15 bg-white px-3 py-2.5 text-sm text-ink transition focus:border-ember focus:outline-none focus:ring-4 focus:ring-ember/10';
+const claseInput = 'w-full rounded-lg border border-ink/15 bg-white px-3 py-3 text-base text-ink transition focus:border-ember sm:py-2.5 sm:text-sm focus:outline-none focus:ring-4 focus:ring-ember/10';
 
 // "18:00" (24h, como se guarda) → "6:00 p. m." (12h, estilo RAE — igual
 // al que usa Home.jsx y el formulario del SFL).
@@ -608,12 +618,12 @@ export default function Registro() {
                 />
               </Campo>
               </div>
-              <div className="flex justify-between pt-2">
+              <BarraAcciones>
                 <BotonSecundario onClick={() => setEditando(false)}>Cancelar</BotonSecundario>
                 <Boton onClick={guardarEdicionYConfirmar} disabled={cargando} variant="green">
                   {cargando ? 'Guardando…' : 'Guardar y confirmar inscripción'}
                 </Boton>
-              </div>
+              </BarraAcciones>
             </div>
           </TarjetaMarca>
         </div>
@@ -624,7 +634,7 @@ export default function Registro() {
   // --- Wizard normal ---
 
   return (
-    <div className="min-h-[70vh] bg-parchment px-5 py-14">
+    <div className="min-h-[70vh] bg-parchment px-5 py-10 pb-28 sm:py-14 sm:pb-14">
       <div className="mx-auto max-w-xl">
         <Encabezado etiqueta={`Inscripción · ${eventoActual.nombre}`} />
 
@@ -639,7 +649,12 @@ export default function Registro() {
           <span>Paso {paso} de {TOTAL_PASOS}</span>
           <span>{NOMBRES_PASOS[paso - 1]}</span>
         </div>
-        <div className="h-1.5 w-full overflow-hidden rounded-full bg-ink/10">
+        <div className="flex gap-1 sm:hidden">
+          {Array.from({ length: TOTAL_PASOS }).map((_, i) => (
+            <span key={i} className={`h-1.5 flex-1 rounded-full ${i < paso ? 'bg-ember' : 'bg-ink/10'}`} />
+          ))}
+        </div>
+        <div className="hidden h-1.5 w-full overflow-hidden rounded-full bg-ink/10 sm:block">
           <div
             className="h-full rounded-full bg-ember transition-all duration-300"
             style={{ width: `${(paso / TOTAL_PASOS) * 100}%` }}
@@ -655,11 +670,11 @@ export default function Registro() {
                 {form.es_extranjero ? 'Empecemos con tu pasaporte' : 'Empecemos con tu DNI'}
               </h2>
 
-              <div className="flex justify-center gap-2">
+              <div className="flex w-full gap-1 rounded-xl border border-ink/15 p-1 sm:justify-center sm:gap-2 sm:border-0 sm:p-0">
                 <button
                   type="button"
                   onClick={() => { setForm((f) => ({ ...f, es_extranjero: false, dni: '' })); setError(''); }}
-                  className={`flex items-center gap-1.5 rounded-full px-4 py-1.5 text-sm font-semibold transition ${
+                  className={`flex flex-1 items-center justify-center gap-1.5 rounded-lg px-4 py-2.5 text-sm font-semibold transition sm:flex-none sm:rounded-full sm:py-1.5 ${
                     !form.es_extranjero ? 'bg-night text-white' : 'border border-ink/20 text-ink/60 hover:bg-ink/5'
                   }`}
                 >
@@ -668,7 +683,7 @@ export default function Registro() {
                 <button
                   type="button"
                   onClick={() => { setForm((f) => ({ ...f, es_extranjero: true, dni: '' })); setError(''); }}
-                  className={`rounded-full px-4 py-1.5 text-sm font-semibold transition ${
+                  className={`flex-1 rounded-lg px-4 py-2.5 text-sm font-semibold transition sm:flex-none sm:rounded-full sm:py-1.5 ${
                     form.es_extranjero ? 'bg-night text-white' : 'border border-ink/20 text-ink/60 hover:bg-ink/5'
                   }`}
                 >
@@ -684,27 +699,27 @@ export default function Registro() {
                     onKeyDown={(e) => {
                       if (e.key === 'Enter' && form.dni.length >= 5 && !cargando) verificarDni();
                     }}
-                    className="w-full rounded-lg border border-ink/15 bg-white px-3 py-3 text-center font-display text-2xl tracking-widest text-ink transition focus:border-ember focus:outline-none focus:ring-4 focus:ring-ember/10"
+                    className="w-full rounded-lg border border-ink/15 bg-white px-2 py-3 text-center font-display text-xl tracking-[0.08em] text-ink sm:px-3 sm:text-2xl sm:tracking-widest transition focus:border-ember focus:outline-none focus:ring-4 focus:ring-ember/10"
                     placeholder="Número de pasaporte"
                   />
                 ) : (
                   <input
-                    type="text" inputMode="numeric" maxLength={13} value={form.dni}
-                    onChange={(e) => actualizar('dni', e.target.value.replace(/\D/g, ''))}
+                    type="text" inputMode="numeric" maxLength={17} value={formatoDniEscribiendo(form.dni)}
+                    onChange={(e) => actualizar('dni', soloDigitosDni(e.target.value))}
                     onKeyDown={(e) => {
                       if (e.key === 'Enter' && form.dni.length === 13 && !cargando) verificarDni();
                     }}
-                    className="w-full rounded-lg border border-ink/15 bg-white px-3 py-3 text-center font-display text-2xl tracking-widest text-ink transition focus:border-ember focus:outline-none focus:ring-4 focus:ring-ember/10"
-                    placeholder="0801199012345"
+                    className="w-full rounded-lg border border-ink/15 bg-white px-2 py-3 text-center font-display text-xl tracking-[0.08em] text-ink sm:px-3 sm:text-2xl sm:tracking-widest transition focus:border-ember focus:outline-none focus:ring-4 focus:ring-ember/10"
+                    placeholder="0801-1990-12345"
                   />
                 )}
                 <span className="mt-2 block text-center text-base font-semibold text-ink/50">
                   {form.es_extranjero ? `${form.dni.length} caracteres` : `${form.dni.length}/13 dígitos`}
                 </span>
               </label>
-              <div className="flex justify-center pt-2">
+              <BarraAcciones centrar>
                 <Boton onClick={verificarDni} disabled={cargando}>{cargando ? 'Verificando…' : 'Continuar'}</Boton>
-              </div>
+              </BarraAcciones>
 
               <Link
                 to="/#reserva-habitaciones"
@@ -743,10 +758,10 @@ export default function Registro() {
                 </select>
               </Campo>
               </div>
-              <div className="flex justify-between pt-2">
+              <BarraAcciones>
                 <BotonSecundario onClick={() => setPaso(1)}>Atrás</BotonSecundario>
                 <Boton onClick={() => validarPaso2() ? setPaso(3) : setError('Completa todos los campos. El teléfono debe tener exactamente 8 dígitos.')}>Continuar</Boton>
-              </div>
+              </BarraAcciones>
             </div>
           )}
 
@@ -782,10 +797,10 @@ export default function Registro() {
                 </select>
               </Campo>
               </div>
-              <div className="flex justify-between pt-2">
+              <BarraAcciones>
                 <BotonSecundario onClick={() => setPaso(2)}>Atrás</BotonSecundario>
                 <Boton onClick={() => validarPaso3() ? setPaso(4) : setError('Completa todos los campos.')}>Continuar</Boton>
-              </div>
+              </BarraAcciones>
             </div>
           )}
 
@@ -829,10 +844,10 @@ export default function Registro() {
                   <p className="mt-1 text-xs text-ink/40">Máximo 99</p>
                 </Campo>
               )}
-              <div className="flex justify-between pt-2">
+              <BarraAcciones>
                 <BotonSecundario onClick={() => setPaso(3)}>Atrás</BotonSecundario>
                 <Boton onClick={() => validarPaso4() ? setPaso(5) : setError('Completa todos los campos.')}>Continuar</Boton>
-              </div>
+              </BarraAcciones>
             </div>
           )}
 
@@ -852,10 +867,10 @@ export default function Registro() {
                 <span className="mt-1 block text-xs text-ink/40">{form.contacto_emergencia_telefono.length}/8 dígitos</span>
               </Campo>
               </div>
-              <div className="flex justify-between pt-2">
+              <BarraAcciones>
                 <BotonSecundario onClick={() => setPaso(4)}>Atrás</BotonSecundario>
                 <Boton onClick={() => validarPaso5() ? setPaso(6) : setError('Completa todos los campos. El teléfono debe tener exactamente 8 dígitos.')}>Continuar</Boton>
-              </div>
+              </BarraAcciones>
             </div>
           )}
 
@@ -882,12 +897,12 @@ export default function Registro() {
                   </div>
                 ))}
               </dl>
-              <div className="flex justify-between pt-2">
+              <BarraAcciones>
                 <BotonSecundario onClick={() => setPaso(5)}>Atrás</BotonSecundario>
                 <Boton onClick={enviarRegistroCompleto} disabled={cargando}>
                   {cargando ? 'Enviando…' : 'Confirmar inscripción'}
                 </Boton>
-              </div>
+              </BarraAcciones>
             </div>
           )}
         </TarjetaMarca>

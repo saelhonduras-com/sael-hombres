@@ -30,6 +30,7 @@ router.post('/auth/login', async (req, res) => {
     );
     res.json({ token, usuario: { id: usuario.id, nombre_completo: usuario.nombre_completo, rol: usuario.rol, email: usuario.email } });
   } catch (err) {
+    console.error('Error en /auth/login:', err);
     res.status(500).json({ error: 'No se pudo iniciar sesión.' });
   }
 });
