@@ -3,8 +3,30 @@ import { useOutletContext } from 'react-router-dom';
 import api, { mensajeError } from '../../api';
 
 const claseInput = 'w-full rounded-lg border border-ink/15 px-3 py-2 text-sm focus:border-ember focus:outline-none';
-const btnGuardar = 'rounded-full bg-[#007334]/10 px-4 py-1.5 text-xs font-semibold text-[#007334] hover:bg-[#007334]/20 disabled:opacity-50';
+const btnGuardar = 'max-md:hidden rounded-full bg-[#007334]/10 px-4 py-1.5 text-xs font-semibold text-[#007334] hover:bg-[#007334]/20 disabled:opacity-50';
 const btnEliminar = 'rounded-full bg-ember/10 px-3 py-1 text-xs font-semibold text-ember hover:bg-ember/20';
+
+// Barra fija (solo celular) con Cancelar / Guardar cambios mientras la edición
+// está activada. Va sobre el menú inferior; en PC no se muestra y se siguen
+// usando los botones "Guardar" de cada tarjeta.
+function BarraEdicionMovil({ visible, guardando, pendientes, onGuardar, onCancelar }) {
+  if (!visible) return null;
+  return (
+    <>
+      <div className="h-20 md:hidden" aria-hidden="true" />
+      <div className="fixed inset-x-3 bottom-[4.5rem] z-40 flex items-center gap-2 rounded-2xl border border-ink/10 bg-white p-2.5 shadow-lg md:hidden">
+        <button type="button" onClick={onCancelar} disabled={guardando}
+          className="shrink-0 rounded-full border border-ink/20 px-4 py-3 text-sm font-semibold text-ink/70 disabled:opacity-50">
+          Cancelar
+        </button>
+        <button type="button" onClick={onGuardar} disabled={guardando || pendientes === 0}
+          className="flex-1 rounded-full bg-[#007334] px-4 py-3 text-sm font-bold text-white disabled:opacity-50">
+          {guardando ? 'Guardando…' : pendientes > 0 ? `Guardar cambios (${pendientes})` : 'Guardar cambios'}
+        </button>
+      </div>
+    </>
+  );
+}
 
 export default function AdminEntradasSalidas() {
   const { rol, permisosPorModulo } = useOutletContext();
@@ -113,8 +135,10 @@ export default function AdminEntradasSalidas() {
       });
       const { data } = await api.get('/admin/boleteria/resumen', { params: { evento_actual_id: eventoActual.id } });
       setResumenBoleteria(data);
+      return true;
     } catch (err) {
       setError(mensajeError(err));
+      return false;
     } finally {
       setGuardandoBoleteria(false);
     }
@@ -127,7 +151,7 @@ export default function AdminEntradasSalidas() {
   async function guardarBoletoInicio() {
     if (!inicioActualCalculado) {
       setError('Completa el "Inventario final" del evento anterior primero, para poder calcular dónde arranca este.');
-      return;
+      return false;
     }
     setGuardandoBoletoInicio(true);
     setError('');
@@ -137,16 +161,24 @@ export default function AdminEntradasSalidas() {
       const actualizado = data.find((e) => e.id === eventoActual.id);
       setBoletoInicioGuardado(actualizado?.boleto_inicio ?? null);
       setBoletoSiguienteEvento(actualizado?.boleto_siguiente ?? null);
+      return true;
     } catch (err) {
       setError(mensajeError(err));
+      return false;
     } finally {
       setGuardandoBoletoInicio(false);
     }
   }
 
   async function guardarBoletoYTecho() {
-    await guardarBoletoInicio();
-    await guardarBoleteria();
+    const a = await guardarBoletoInicio();
+    const b = await guardarBoleteria();
+    return a && b;
+  }
+
+  // Celular: guarda todo lo de Boletería con un solo botón y sale de edición.
+  async function guardarBarraBoleteria() {
+    if (await guardarBoletoYTecho()) setModoEdicionBoleteria(false);
   }
 
   // --- Hotel por módulo ---
@@ -160,7 +192,7 @@ export default function AdminEntradasSalidas() {
 
   async function guardarCostoModulo(modulo) {
     const monto = campoHotel(modulo.id, 'monto');
-    if (monto === undefined || monto === '') return;
+    if (monto === undefined || monto === '') return false;
     setGuardandoHotelId(modulo.id);
     setError('');
     try {
@@ -171,11 +203,22 @@ export default function AdminEntradasSalidas() {
       });
       setEditandoHotel((e) => { const copia = { ...e }; delete copia[modulo.id]; return copia; });
       cargarTodo();
+      return true;
     } catch (err) {
       setError(mensajeError(err));
+      return false;
     } finally {
       setGuardandoHotelId(null);
     }
+  }
+
+  // Celular: guarda todos los módulos de hotel con cambios.
+  async function guardarBarraHotel() {
+    let ok = true;
+    for (const m of modulos.filter((x) => editandoHotel[x.id])) {
+      if ((await guardarCostoModulo(m)) === false) ok = false;
+    }
+    if (ok) setModoEdicionHotel(false);
   }
 
   const [guardandoGrupo, setGuardandoGrupo] = useState(null);
@@ -198,11 +241,20 @@ export default function AdminEntradasSalidas() {
         return copia;
       });
       cargarTodo();
+      return true;
     } catch (err) {
       setError(mensajeError(err));
+      return false;
     } finally {
       setGuardandoGrupo(null);
     }
+  }
+
+  // Celular: guarda los precios de las dos listas de comidas.
+  async function guardarBarraComida() {
+    const a = await guardarPreciosGrupo('comida_evento');
+    const b = await guardarPreciosGrupo('comida_vigilia');
+    if (a && b) setModoEdicionComida(false);
   }
 
   return (
@@ -360,6 +412,14 @@ export default function AdminEntradasSalidas() {
               </div>
             </div>
           </div>
+          )}
+
+          {seccion === 'boleteria' && (
+            <BarraEdicionMovil
+              visible={modoEdicionBoleteria} guardando={guardandoBoleteria || guardandoBoletoInicio} pendientes={-1}
+              onGuardar={guardarBarraBoleteria}
+              onCancelar={() => { setModoEdicionBoleteria(false); cargarTodo(); }}
+            />
           )}
 
           {/* ENTRADAS DE EFECTIVO — cuentas de ingreso del Catálogo */}
@@ -537,6 +597,23 @@ export default function AdminEntradasSalidas() {
             </div>
           </div>
           )}
+
+          {seccion === 'comida' && (
+            <BarraEdicionMovil
+              visible={modoEdicionComida} guardando={guardandoGrupo !== null}
+              pendientes={Object.keys(editandoPrecio).length}
+              onGuardar={guardarBarraComida}
+              onCancelar={() => { setEditandoPrecio({}); setModoEdicionComida(false); }}
+            />
+          )}
+          {seccion === 'habitaciones' && (
+            <BarraEdicionMovil
+              visible={modoEdicionHotel} guardando={guardandoHotelId !== null}
+              pendientes={Object.keys(editandoHotel).length}
+              onGuardar={guardarBarraHotel}
+              onCancelar={() => { setEditandoHotel({}); setModoEdicionHotel(false); }}
+            />
+          )}
         </div>
       )}
     </div>
@@ -592,7 +669,7 @@ function SeccionValoresCuenta({ titulo, subtitulo, tipo, eventoId, onError, pued
     const valor = editandoCampos[cuenta.cuenta_id]?.valor ?? cuenta.valor;
     if (cantidad === '' || cantidad === null || valor === '' || valor === null || valor === undefined) {
       onError('Escribe la cantidad y el valor.');
-      return;
+      return false;
     }
     setGuardandoId(cuenta.cuenta_id);
     onError('');
@@ -600,11 +677,22 @@ function SeccionValoresCuenta({ titulo, subtitulo, tipo, eventoId, onError, pued
       await api.put(`/admin/eventos/${eventoId}/valores-cuenta/${cuenta.cuenta_id}`, { cantidad: Number(cantidad), valor: Number(valor) });
       setEditandoCampos((e) => { const c = { ...e }; delete c[cuenta.cuenta_id]; return c; });
       cargar();
+      return true;
     } catch (err) {
       onError(mensajeError(err));
+      return false;
     } finally {
       setGuardandoId(null);
     }
+  }
+
+  // Celular: guarda todas las filas con cambios con un solo botón.
+  async function guardarBarraValores() {
+    let ok = true;
+    for (const c of cuentasConValor.filter((x) => editandoCampos[x.cuenta_id])) {
+      if ((await guardarValores(c)) === false) ok = false;
+    }
+    if (ok) setModoEdicion(false);
   }
 
   function quitarValor(cuenta) {
@@ -746,6 +834,13 @@ function SeccionValoresCuenta({ titulo, subtitulo, tipo, eventoId, onError, pued
           {guardandoNuevo ? 'Agregando…' : '+ Agregar'}
         </button>
       </div>
+
+      <BarraEdicionMovil
+        visible={modoEdicion} guardando={guardandoId !== null}
+        pendientes={Object.keys(editandoCampos).length}
+        onGuardar={guardarBarraValores}
+        onCancelar={() => { setEditandoCampos({}); setModoEdicion(false); }}
+      />
 
       {confirmacion && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink/40 px-4">
