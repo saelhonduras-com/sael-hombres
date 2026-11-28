@@ -10,7 +10,10 @@ export default function AdminDiplomas() {
   const [descargando, setDescargando] = useState('');
   const [mayusculas, setMayusculas] = useState(false); // opción para PDF/Imprimir/Excel; por defecto apagada
   const [pagina, setPagina] = useState(1);
-  const POR_PAGINA = 10;
+  const [porPagina, setPorPagina] = useState(25);
+  const POR_PAGINA = porPagina;
+  const totalPaginas = Math.max(1, Math.ceil((datos?.filas?.length || 0) / porPagina));
+  const paginaSegura = Math.min(pagina, totalPaginas);
 
   // --- Inventario de diplomas (standalone, captura manual) ---
   const [modoEdicionInventario, setModoEdicionInventario] = useState(false);
@@ -240,7 +243,7 @@ export default function AdminDiplomas() {
                 {(!datos || datos.filas.length === 0) && (
                   <p className="rounded-2xl bg-white px-4 py-6 text-center text-sm text-ink/40 shadow-sm">Todavía no hay participantes con asistencia confirmada en este evento.</p>
                 )}
-                {datos?.filas.slice((pagina - 1) * POR_PAGINA, pagina * POR_PAGINA).map((f) => {
+                {datos?.filas.slice((paginaSegura - 1) * POR_PAGINA, paginaSegura * POR_PAGINA).map((f) => {
                   const monto = Number(f.alimentacion_monto) > 0 ? `L. ${f.alimentacion_monto}` : '';
                   const metodo = { efectivo: 'Efectivo', transferencia: 'Transferencia', tarjeta: 'Tarjeta' }[f.metodo_pago];
                   return (
@@ -285,7 +288,7 @@ export default function AdminDiplomas() {
                   {(!datos || datos.filas.length === 0) && (
                     <tr><td colSpan={10} className="px-4 py-6 text-center text-ink/40">Todavía no hay participantes con asistencia confirmada en este evento.</td></tr>
                   )}
-                  {datos?.filas.slice((pagina - 1) * POR_PAGINA, pagina * POR_PAGINA).map((f) => (
+                  {datos?.filas.slice((paginaSegura - 1) * POR_PAGINA, paginaSegura * POR_PAGINA).map((f) => (
                     <tr key={f.numero} className="border-b border-ink/5 text-left last:border-0">
                       <td className="px-4 py-3 text-ink/60">{f.numero}</td>
                       <td className="px-4 py-3 font-medium text-ink">{f.zona}</td>
@@ -314,20 +317,37 @@ export default function AdminDiplomas() {
                   </tfoot>
                 )}
               </table>
-              {datos && datos.filas.length > POR_PAGINA && (
-                <div className="flex flex-wrap items-center justify-between gap-2 border-t border-ink/10 px-4 py-3 print:hidden">
-                  <p className="text-xs text-ink/40">
-                    Mostrando {(pagina - 1) * POR_PAGINA + 1}–{Math.min(pagina * POR_PAGINA, datos.filas.length)} de {datos.filas.length}
+              {datos && datos.filas.length > 0 && (
+                <div className="flex flex-wrap items-center justify-between gap-3 border-t border-ink/10 px-4 py-3 text-sm text-ink/70 print:hidden">
+                  <p>
+                    Mostrando {(paginaSegura - 1) * porPagina + 1}–{Math.min(paginaSegura * porPagina, datos.filas.length)} de {datos.filas.length}
                   </p>
-                  <div className="flex flex-wrap items-center gap-1">
-                    {Array.from({ length: Math.ceil(datos.filas.length / POR_PAGINA) }, (_, i) => i + 1).map((n) => (
-                      <button
-                        key={n} onClick={() => setPagina(n)}
-                        className={`rounded-full px-2.5 py-1 text-xs font-semibold ${n === pagina ? 'bg-[#007334] text-white' : 'border border-ink/15 text-ink/70 hover:bg-ink/5'}`}
+                  <div className="flex flex-wrap items-center gap-2">
+                    <label className="flex items-center gap-1 text-xs">
+                      Por página
+                      <select
+                        value={porPagina}
+                        onChange={(e) => { setPorPagina(Number(e.target.value)); setPagina(1); }}
+                        className="rounded-lg border border-ink/20 bg-white px-2 py-1 text-sm"
                       >
-                        {n}
-                      </button>
-                    ))}
+                        {[10, 25, 50, 100].map((n) => <option key={n} value={n}>{n}</option>)}
+                      </select>
+                    </label>
+                    <button
+                      onClick={() => setPagina(Math.max(1, paginaSegura - 1))}
+                      disabled={paginaSegura <= 1}
+                      className="rounded-full border border-ink/20 px-3 py-1 font-semibold hover:bg-ink/5 disabled:opacity-40"
+                    >
+                      ← Anterior
+                    </button>
+                    <span className="text-xs">Página {paginaSegura} de {totalPaginas}</span>
+                    <button
+                      onClick={() => setPagina(Math.min(totalPaginas, paginaSegura + 1))}
+                      disabled={paginaSegura >= totalPaginas}
+                      className="rounded-full border border-ink/20 px-3 py-1 font-semibold hover:bg-ink/5 disabled:opacity-40"
+                    >
+                      Siguiente →
+                    </button>
                   </div>
                 </div>
               )}
