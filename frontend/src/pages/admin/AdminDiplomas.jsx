@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import api, { mensajeError } from '../../api';
+import { nombreZona } from '../../listas';
 
 export default function AdminDiplomas() {
   const [eventoActual, setEventoActual] = useState(null);
